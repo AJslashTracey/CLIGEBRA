@@ -1,0 +1,11 @@
+README.md
+pyproject.toml
+src/cligebra/__init__.py
+src/cligebra/app.py
+src/cligebra/scene.py
+src/cligebra.egg-info/PKG-INFO
+src/cligebra.egg-info/SOURCES.txt
+src/cligebra.egg-info/dependency_links.txt
+src/cligebra.egg-info/entry_points.txt
+src/cligebra.egg-info/requires.txt
+src/cligebra.egg-info/top_level.txt

@@ -1,0 +1,2 @@
+[console_scripts]
+cligebra = cligebra.app:run
