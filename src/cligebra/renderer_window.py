@@ -21,6 +21,10 @@ LINE_LEGACY_RE = re.compile(
     r"point\s*(\([^)]*\))\s*dir\s*(\([^)]*\)|\[[^]]*\]|vec\[[^]]*\])",
     re.IGNORECASE,
 )
+CYLINDER_RE = re.compile(
+    r"(?:zyl|cyl|cylinder)\s*\(\s*(\([^)]*\))\s*,\s*(\([^)]*\))\s*,\s*([^,()]+)\s*\)",
+    re.IGNORECASE,
+)
 
 
 @dataclass(slots=True)
@@ -120,6 +124,10 @@ def plane_basis(normal: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     u = u / np.linalg.norm(u)
     v = np.cross(unit, u)
     return u, v
+
+
+def cylinder_basis(axis_unit: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    return plane_basis(axis_unit)
 
 
 def world_to_view(point: np.ndarray, camera: CameraState) -> np.ndarray:
@@ -266,6 +274,15 @@ class SceneWindow(QWidget):
                     np.array(obj["normal"], dtype=float),
                     obj["name"],
                 )
+            elif kind == "cylinder":
+                self.draw_cylinder(
+                    painter,
+                    viewport,
+                    np.array(obj["start"], dtype=float),
+                    np.array(obj["end"], dtype=float),
+                    float(obj["radius"]),
+                    obj["name"],
+                )
 
     def draw_point(self, painter: QPainter, viewport, point: np.ndarray, name: str) -> None:
         x, y = self.project(point, viewport)
@@ -345,6 +362,54 @@ class SceneWindow(QWidget):
                 previous = current
         label = self.project(point, viewport)
         painter.setPen(QPen(QColor("#adb5bd")))
+        painter.drawText(int(label[0] + 6), int(label[1] - 6), name)
+
+    def draw_cylinder(
+        self,
+        painter: QPainter,
+        viewport,
+        start: np.ndarray,
+        end: np.ndarray,
+        radius: float,
+        name: str,
+    ) -> None:
+        axis = end - start
+        axis_norm = np.linalg.norm(axis)
+        if axis_norm == 0.0:
+            return
+
+        axis_unit = axis / axis_norm
+        u, v = cylinder_basis(axis_unit)
+        segments = 24
+        bottom_points: list[np.ndarray] = []
+        top_points: list[np.ndarray] = []
+
+        for index in range(segments):
+            angle = math.tau * index / segments
+            offset = radius * (math.cos(angle) * u + math.sin(angle) * v)
+            bottom_points.append(start + offset)
+            top_points.append(end + offset)
+
+        cylinder_color = QColor("#22d3c5")
+        painter.setPen(QPen(cylinder_color, 2))
+        for index in range(segments):
+            next_index = (index + 1) % segments
+            painter.drawLine(
+                *self.project(bottom_points[index], viewport),
+                *self.project(bottom_points[next_index], viewport),
+            )
+            painter.drawLine(
+                *self.project(top_points[index], viewport),
+                *self.project(top_points[next_index], viewport),
+            )
+            if index % 4 == 0:
+                painter.drawLine(
+                    *self.project(bottom_points[index], viewport),
+                    *self.project(top_points[index], viewport),
+                )
+
+        label = self.project((start + end) / 2 + u * radius * 1.2, viewport)
+        painter.setPen(QPen(QColor("#99f6e4")))
         painter.drawText(int(label[0] + 6), int(label[1] - 6), name)
 
     def draw_overlay(self, painter: QPainter) -> None:
@@ -443,6 +508,37 @@ def compile_payload(scene_payload: dict) -> dict:
             )
             continue
 
+        if kind == "cylinder":
+            try:
+                start_expr, end_expr, radius = parse_cylinder_expression(expression)
+            except ValueError as error:
+                issues.append(f"{name}: {error}")
+                continue
+
+            start = parse_point(start_expr)
+            end = parse_point(end_expr)
+            axis = None if start is None or end is None else end - start
+            if start is None or end is None:
+                issues.append(f"{name}: cylinder points must use (x,y,z)")
+                continue
+            if radius <= 0.0:
+                issues.append(f"{name}: cylinder radius must be greater than 0")
+                continue
+            if axis is None or np.allclose(axis, 0.0):
+                issues.append(f"{name}: cylinder start and end must be different points")
+                continue
+
+            compiled_objects.append(
+                {
+                    "kind": "cylinder",
+                    "name": name,
+                    "start": start.tolist(),
+                    "end": end.tolist(),
+                    "radius": radius,
+                }
+            )
+            continue
+
         issues.append(f"{name}: unsupported {kind}")
 
     return {"objects": compiled_objects, "issues": issues, "status": scene_payload.get("status", "")}
@@ -459,6 +555,21 @@ def parse_line_expression(expression: str) -> tuple[str, str]:
         return legacy_match.group(1), legacy_match.group(2)
 
     raise ValueError("invalid line expression")
+
+
+def parse_cylinder_expression(expression: str) -> tuple[str, str, float]:
+    stripped = expression.strip()
+    match = CYLINDER_RE.fullmatch(stripped)
+    if match is None:
+        raise ValueError("expected zyl((x,y,z), (x,y,z), radius)")
+
+    start_expr, end_expr, radius_expr = match.groups()
+    try:
+        radius = float(radius_expr.strip())
+    except ValueError as error:
+        raise ValueError("cylinder radius must be numeric") from error
+
+    return start_expr, end_expr, radius
 
 
 def renderer_main(state_file: Path) -> None:

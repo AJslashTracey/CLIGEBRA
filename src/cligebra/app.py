@@ -110,6 +110,7 @@ class VimMotion:
     start: tuple[int, int]
     end: tuple[int, int]
     linewise: bool = False
+    inclusive: bool = False
 
 
 class VimTextArea(TextArea):
@@ -118,6 +119,8 @@ class VimTextArea(TextArea):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._pending_operator: str | None = None
+        self._pending_count = 1
+        self._count_prefix = ""
         self._register = ""
         self._register_linewise = False
 
@@ -131,11 +134,14 @@ class VimTextArea(TextArea):
 
     def enter_normal_mode(self) -> None:
         self.mode = "NORMAL"
-        self._pending_operator = None
+        self._clear_pending()
+        row, column = self.cursor_location
+        if column > 0:
+            self.move_cursor((row, column - 1))
 
     def enter_insert_mode(self) -> None:
         self.mode = "INSERT"
-        self._pending_operator = None
+        self._clear_pending()
 
     def on_focus(self) -> None:
         self.watch_mode(self.mode)
@@ -186,66 +192,102 @@ class VimTextArea(TextArea):
     def _handle_normal_mode_key(self, event: Key) -> bool:
         key = event.key
         character = event.character
+        token = character or key
 
         if key == "escape":
-            self._pending_operator = None
-            self._set_status("NORMAL")
+            self._reset_command("NORMAL")
+            return True
+
+        if token.isdigit() and (token != "0" or self._count_prefix or self._pending_operator is not None):
+            self._count_prefix += token
+            self._set_status(self._command_status())
             return True
 
         if self._pending_operator is not None:
             operator = self._pending_operator
-            self._pending_operator = None
-            if operator == key == "d":
-                self._delete_current_line()
+            operator_count = self._pending_count
+            motion_count = self._consume_count()
+            count = operator_count * motion_count
+
+            if operator == token:
+                self._apply_line_operator(operator, count)
+                self._clear_pending()
                 return True
-            if operator == key == "y":
-                self._yank_current_line()
+
+            motion = self._motion_for_key(token, count=count, operator_pending=True)
+            if motion is not None:
+                self._apply_operator(operator, motion)
+                self._clear_pending()
                 return True
-            self._set_status(f"NORMAL  cancelled {operator}")
+
+            self._reset_command(f"NORMAL  cancelled {operator}")
             return True
 
-        if key == "i":
+        if token == "u":
+            self.action_undo()
+            self._reset_command("NORMAL  undo")
+            return True
+        if key == "ctrl+r":
+            self.action_redo()
+            self._reset_command("NORMAL  redo")
+            return True
+
+        if token in {"d", "y", "c"}:
+            self._pending_operator = token
+            self._pending_count = self._consume_count()
+            self._set_status(self._command_status())
+            return True
+
+        count = self._consume_count()
+
+        if token == "i":
             self.enter_insert_mode()
             return True
-        if key == "a":
-            self.action_cursor_right()
+        if token == "a":
+            row, column = self.cursor_location
+            line = self._current_lines()[row]
+            if column < len(line):
+                self.move_cursor((row, column + 1))
             self.enter_insert_mode()
             return True
-        if key == "h":
-            self.action_cursor_left()
+        if token == "I":
+            self.move_cursor(self._first_non_blank(self.cursor_location[0]))
+            self.enter_insert_mode()
             return True
-        if key == "j":
-            self.action_cursor_down()
+        if token == "A":
+            self.move_cursor(self._line_end(self.cursor_location[0]))
+            self.enter_insert_mode()
             return True
-        if key == "k":
-            self.action_cursor_up()
+        if token == "o":
+            row, _ = self.cursor_location
+            self.insert("\n", self._line_end(row))
+            self.move_cursor((row + 1, 0))
+            self.enter_insert_mode()
             return True
-        if key == "l":
-            self.action_cursor_right()
+        if token == "O":
+            row, _ = self.cursor_location
+            self.insert("\n", (row, 0))
+            self.move_cursor((row, 0))
+            self.enter_insert_mode()
             return True
-        if key == "0":
-            self.action_cursor_line_start()
+
+        if token == "x":
+            self._delete_under_cursor(count)
             return True
-        if key == "$":
-            self.action_cursor_line_end()
+        if token == "p":
+            self._put_register(after=True, count=count)
             return True
-        if key == "w":
-            self.move_cursor(self.get_cursor_word_right_location())
+        if token == "P":
+            self._put_register(after=False, count=count)
             return True
-        if key == "b":
-            self.move_cursor(self.get_cursor_word_left_location())
+
+        motion = self._motion_for_key(token, count=count, operator_pending=False)
+        if motion is not None:
+            self.move_cursor(motion.end)
             return True
-        if key == "x":
-            self._delete_under_cursor()
-            return True
-        if key in {"d", "y"}:
-            self._pending_operator = key
-            self._set_status(f"NORMAL  {key}")
-            return True
-        if key == "p":
-            self._put_register()
-            return True
+
         if key == ":" or character == ":":
+            self._clear_pending()
             try:
                 app = self.app
             except Exception:
@@ -256,77 +298,279 @@ class VimTextArea(TextArea):
 
         return True
 
+    def _consume_count(self) -> int:
+        if not self._count_prefix:
+            return 1
+        count = max(1, int(self._count_prefix))
+        self._count_prefix = ""
+        return count
+
+    def _clear_pending(self) -> None:
+        self._pending_operator = None
+        self._pending_count = 1
+        self._count_prefix = ""
+
+    def _reset_command(self, status: str | None = None) -> None:
+        self._clear_pending()
+        if status is not None:
+            self._set_status(status)
+
+    def _command_status(self) -> str:
+        if self._pending_operator is None:
+            return f"NORMAL  {self._count_prefix}" if self._count_prefix else "NORMAL"
+        prefix = "" if self._pending_count == 1 else str(self._pending_count)
+        return f"NORMAL  {prefix}{self._pending_operator}{self._count_prefix}"
+
+    def _motion_for_key(self, key: str, *, count: int, operator_pending: bool) -> VimMotion | None:
+        start = self.cursor_location
+        if key == "h":
+            return VimMotion(start, self._left(start, count))
+        if key == "l":
+            return VimMotion(start, self._right(start, count))
+        if key == "j":
+            return VimMotion(start, self._vertical(start, count), linewise=operator_pending)
+        if key == "k":
+            return VimMotion(start, self._vertical(start, -count), linewise=operator_pending)
+        if key == "0":
+            return VimMotion(start, (start[0], 0))
+        if key == "^":
+            return VimMotion(start, self._first_non_blank(start[0]))
+        if key == "$":
+            return VimMotion(start, self._line_end(start[0]))
+        if key == "w":
+            return VimMotion(start, self._word_right(start, count))
+        if key == "b":
+            return VimMotion(start, self._word_left(start, count))
+        if key == "e":
+            return VimMotion(start, self._word_end(start, count), inclusive=operator_pending)
+        return None
+
     def _current_lines(self) -> list[str]:
         return self.text.split("\n")
 
-    def _delete_under_cursor(self) -> None:
-        row, column = self.cursor_location
-        lines = self._current_lines()
-        line = lines[row]
+    def _apply_line_operator(self, operator: str, count: int) -> None:
+        row, _ = self.cursor_location
+        end_row = min(row + count - 1, len(self._current_lines()) - 1)
+        motion = VimMotion((row, 0), (end_row, 0), linewise=True)
+        self._apply_operator(operator, motion)
 
-        if column < len(line):
-            deleted = line[column]
-            self._register = deleted
-            self._register_linewise = False
-            self.delete((row, column), (row, column + 1))
-            self.move_cursor((row, column))
+    def _apply_operator(self, operator: str, motion: VimMotion) -> None:
+        if motion.linewise:
+            start, end = self._linewise_span(motion.start[0], motion.end[0])
+            linewise = True
+        else:
+            start, end = self._ordered_span(motion.start, motion.end)
+            if start == end:
+                return
+            if motion.inclusive:
+                end = self._right(end, 1)
+            linewise = False
+
+        text = self._slice_text(start, end)
+        if operator == "y":
+            self._register = text
+            self._register_linewise = linewise
+            self.move_cursor(start)
+            self._set_status("NORMAL  yanked")
             return
 
-        if row < len(lines) - 1:
-            self._register = "\n"
-            self._register_linewise = False
-            self.delete((row, column), (row + 1, 0))
-            self.move_cursor((row, column))
-
-    def _delete_current_line(self) -> None:
-        row, _ = self.cursor_location
-        lines = self._current_lines()
-        line = lines[row]
-
-        self._register = line + ("\n" if row < len(lines) - 1 else "")
-        self._register_linewise = True
-
-        if len(lines) == 1:
-            self.load_text("")
-            self.move_cursor((0, 0))
+        self._register = text
+        self._register_linewise = linewise
+        self.delete(start, end)
+        self.move_cursor(self._clamp_location(start))
+        if operator == "c":
+            self.enter_insert_mode()
+            self._set_status("INSERT  changed")
         else:
-            end = (row + 1, 0) if row < len(lines) - 1 else (row, len(line))
-            self.delete((row, 0), end)
-            new_row = min(row, len(self._current_lines()) - 1)
-            self.move_cursor((new_row, 0))
+            self._set_status("NORMAL  deleted")
 
-        self._set_status("NORMAL  deleted line")
-
-    def _yank_current_line(self) -> None:
-        row, _ = self.cursor_location
+    def _clamp_location(self, location: tuple[int, int]) -> tuple[int, int]:
         lines = self._current_lines()
-        line = lines[row]
-        self._register = line + ("\n" if row < len(lines) - 1 else "")
-        self._register_linewise = True
-        self._set_status("NORMAL  yanked line")
+        row = min(max(0, location[0]), len(lines) - 1)
+        column = min(max(0, location[1]), len(lines[row]))
+        return row, column
 
-    def _put_register(self) -> None:
+    def _left(self, location: tuple[int, int], count: int) -> tuple[int, int]:
+        row, column = location
+        for _ in range(count):
+            if column > 0:
+                column -= 1
+            elif row > 0:
+                row -= 1
+                column = len(self._current_lines()[row])
+        return row, column
+
+    def _right(self, location: tuple[int, int], count: int) -> tuple[int, int]:
+        row, column = location
+        lines = self._current_lines()
+        for _ in range(count):
+            if column < len(lines[row]):
+                column += 1
+            elif row < len(lines) - 1:
+                row += 1
+                column = 0
+        return row, column
+
+    def _vertical(self, location: tuple[int, int], delta: int) -> tuple[int, int]:
+        lines = self._current_lines()
+        row, column = location
+        row = min(max(0, row + delta), len(lines) - 1)
+        return row, min(column, len(lines[row]))
+
+    def _line_end(self, row: int) -> tuple[int, int]:
+        return row, len(self._current_lines()[row])
+
+    def _first_non_blank(self, row: int) -> tuple[int, int]:
+        line = self._current_lines()[row]
+        return row, len(line) - len(line.lstrip())
+
+    def _word_right(self, location: tuple[int, int], count: int) -> tuple[int, int]:
+        index = self._index_from_location(location)
+        for _ in range(count):
+            index = self._next_word_start(index)
+        return self._location_from_index(index)
+
+    def _word_left(self, location: tuple[int, int], count: int) -> tuple[int, int]:
+        index = self._index_from_location(location)
+        for _ in range(count):
+            index = self._previous_word_start(index)
+        return self._location_from_index(index)
+
+    def _word_end(self, location: tuple[int, int], count: int) -> tuple[int, int]:
+        index = self._index_from_location(location)
+        for _ in range(count):
+            index = self._next_word_end(index)
+        return self._location_from_index(index)
+
+    def _index_from_location(self, location: tuple[int, int]) -> int:
+        lines = self._current_lines()
+        row, column = self._clamp_location(location)
+        return sum(len(line) + 1 for line in lines[:row]) + column
+
+    def _location_from_index(self, index: int) -> tuple[int, int]:
+        lines = self._current_lines()
+        index = min(max(0, index), len(self.text))
+        offset = 0
+        for row, line in enumerate(lines):
+            line_end = offset + len(line)
+            if index <= line_end:
+                return row, index - offset
+            offset = line_end + 1
+        return len(lines) - 1, len(lines[-1])
+
+    def _word_kind(self, character: str) -> str:
+        if character.isspace():
+            return "space"
+        if character.isalnum() or character == "_":
+            return "word"
+        return "punct"
+
+    def _next_word_start(self, index: int) -> int:
+        text = self.text
+        if index >= len(text):
+            return len(text)
+
+        if not text[index].isspace():
+            kind = self._word_kind(text[index])
+            while index < len(text) and self._word_kind(text[index]) == kind:
+                index += 1
+
+        while index < len(text) and text[index].isspace():
+            index += 1
+        return index
+
+    def _previous_word_start(self, index: int) -> int:
+        text = self.text
+        if index <= 0:
+            return 0
+
+        index -= 1
+        while index > 0 and text[index].isspace():
+            index -= 1
+
+        kind = self._word_kind(text[index])
+        while index > 0 and self._word_kind(text[index - 1]) == kind:
+            index -= 1
+        return index
+
+    def _next_word_end(self, index: int) -> int:
+        text = self.text
+        if index >= len(text):
+            return len(text)
+
+        if not text[index].isspace():
+            kind = self._word_kind(text[index])
+            if index + 1 < len(text) and self._word_kind(text[index + 1]) == kind:
+                index += 1
+
+        while index < len(text) and text[index].isspace():
+            index += 1
+
+        if index >= len(text):
+            return len(text)
+
+        kind = self._word_kind(text[index])
+        while index + 1 < len(text) and self._word_kind(text[index + 1]) == kind:
+            index += 1
+        return index
+
+    def _ordered_span(self, start: tuple[int, int], end: tuple[int, int]) -> tuple[tuple[int, int], tuple[int, int]]:
+        return (start, end) if start <= end else (end, start)
+
+    def _linewise_span(self, first_row: int, second_row: int) -> tuple[tuple[int, int], tuple[int, int]]:
+        lines = self._current_lines()
+        start_row, end_row = sorted((first_row, second_row))
+        if end_row < len(lines) - 1:
+            return (start_row, 0), (end_row + 1, 0)
+        return (start_row, 0), (end_row, len(lines[end_row]))
+
+    def _slice_text(self, start: tuple[int, int], end: tuple[int, int]) -> str:
+        lines = self._current_lines()
+        start_row, start_column = start
+        end_row, end_column = end
+
+        if start_row == end_row:
+            return lines[start_row][start_column:end_column]
+
+        chunks = [lines[start_row][start_column:]]
+        chunks.extend(lines[start_row + 1 : end_row])
+        chunks.append(lines[end_row][:end_column])
+        return "\n".join(chunks)
+
+    def _delete_under_cursor(self, count: int = 1) -> None:
+        row, column = self.cursor_location
+        end = self._right((row, column), count)
+        if end == (row, column):
+            return
+        self._apply_operator("d", VimMotion((row, column), end))
+
+    def _put_register(self, *, after: bool, count: int = 1) -> None:
         if not self._register:
             return
 
         row, column = self.cursor_location
         lines = self._current_lines()
+        line = lines[row]
+        text = self._register * count
 
         if self._register_linewise:
-            insert_line = self._register.rstrip("\n")
-            if row < len(lines) - 1:
-                self.insert(insert_line + "\n", (row + 1, 0))
-                self.move_cursor((row + 1, 0))
+            if after:
+                if row < len(lines) - 1:
+                    insert_at = (row + 1, 0)
+                    insert_text = text if text.endswith("\n") else text + "\n"
+                else:
+                    insert_at = (row, len(line))
+                    insert_text = ("\n" if self.text else "") + text.rstrip("\n")
             else:
-                suffix = ("\n" if self.text else "") + insert_line
-                self.insert(suffix, (row, len(lines[row])))
-                target_row = row + 1 if self.text else 0
-                self.move_cursor((target_row, 0))
+                insert_at = (row, 0)
+                insert_text = text if text.endswith("\n") else text + "\n"
+            self.insert(insert_text, insert_at)
+            self.move_cursor((min(insert_at[0], len(self._current_lines()) - 1), 0))
             self._set_status("NORMAL  put line")
             return
 
-        insert_at = (row, min(column + 1, len(lines[row])))
-        self.insert(self._register, insert_at)
+        insert_at = (row, min(column + (1 if after else 0), len(line)))
+        self.insert(text, insert_at)
         self.move_cursor(insert_at)
         self._set_status("NORMAL  put")
 
