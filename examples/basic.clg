@@ -1,0 +1,7 @@
+# Basic CLIGEBRA scene
+p0 = (0, 0, 0)
+p1 = (2, 1, 0)
+v1 = vec[1, 2, 0]
+l1 = line(point(0,0,0), dir(1,1,0))
+floor = z = 0
+c1 = zyl((0,0,0), (0,0,4), 0.6)

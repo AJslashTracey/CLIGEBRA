@@ -33,13 +33,19 @@ python3 main.py
 Watch a scene file and update the renderer when it is saved:
 
 ```bash
-cligebra watch scene.clg
+cligebra watch examples/basic.clg
 ```
 
 Check a scene file without opening the renderer:
 
 ```bash
-cligebra check scene.clg
+cligebra check examples/basic.clg
+```
+
+For editor integrations, checks can also be emitted as JSON:
+
+```bash
+cligebra check examples/basic.clg --json
 ```
 
 Installed entrypoint:
