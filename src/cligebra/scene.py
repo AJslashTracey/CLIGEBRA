@@ -9,6 +9,7 @@ class SceneObject:
     name: str
     expression: str
     line_no: int
+    anonymous: bool = False
 
 
 @dataclass(slots=True)
@@ -19,14 +20,27 @@ class ParseIssue:
 
 SCENE_SAMPLE = """# Scene buffer
 # Edit objects here. Parsed objects appear in the sidebar.
-point P1 = (0, 0, 0)
-vector V1 = [1, 2, 0]
-line L1 = point(0,0,0) dir(1,1,0)
-plane A = 2x + y + 2z - 8 = 0
+p1 = (0, 0, 0)
+v1 = vec[1, 2, 0]
+l1 = line(point(0,0,0), dir(1,1,0))
+a = 2x + y + 2z - 8 = 0
+vec[0, 0, 2]
 """
 
 
 VALID_KINDS = {"point", "vector", "line", "plane", "cylinder"}
+KIND_ALIASES = {
+    "point": "point",
+    "pt": "point",
+    "vector": "vector",
+    "vec": "vector",
+    "line": "line",
+    "ln": "line",
+    "plane": "plane",
+    "pl": "plane",
+    "cylinder": "cylinder",
+    "cyl": "cylinder",
+}
 
 
 def parse_scene(source: str) -> tuple[list[SceneObject], list[ParseIssue]]:
@@ -38,19 +52,29 @@ def parse_scene(source: str) -> tuple[list[SceneObject], list[ParseIssue]]:
         if not line or line.startswith("#"):
             continue
 
-        if "=" not in line:
-            issues.append(ParseIssue(line_no, "Expected '=' in object definition"))
-            continue
+        anonymous = "=" not in line
+        if anonymous:
+            expression = line
+            name = f"_{line_no}"
+            kind = infer_kind(expression)
+        else:
+            head, expression = [part.strip() for part in line.split("=", 1)]
+            head_parts = head.split()
+            if len(head_parts) == 1:
+                name = head_parts[0]
+                kind = infer_kind(expression)
+            elif len(head_parts) == 2:
+                declared_kind, name = head_parts
+                kind = KIND_ALIASES.get(declared_kind)
+                if kind is None:
+                    issues.append(ParseIssue(line_no, f"Unknown object type '{declared_kind}'"))
+                    continue
+            else:
+                issues.append(ParseIssue(line_no, "Expected '<name> = <expr>' or '<kind> <name> = <expr>'"))
+                continue
 
-        head, expression = [part.strip() for part in line.split("=", 1)]
-        head_parts = head.split()
-        if len(head_parts) != 2:
-            issues.append(ParseIssue(line_no, "Expected '<kind> <name> = <expr>'"))
-            continue
-
-        kind, name = head_parts
-        if kind not in VALID_KINDS:
-            issues.append(ParseIssue(line_no, f"Unknown object type '{kind}'"))
+        if kind is None:
+            issues.append(ParseIssue(line_no, "Could not infer object type from expression"))
             continue
 
         if not name.replace("_", "").isalnum():
@@ -59,8 +83,13 @@ def parse_scene(source: str) -> tuple[list[SceneObject], list[ParseIssue]]:
 
         if kind == "vector":
             stripped = expression.strip()
-            if not (stripped.startswith("[") and stripped.endswith("]")):
-                issues.append(ParseIssue(line_no, "Vectors must use square brackets: [x, y, z]"))
+            if not (
+                stripped.startswith("vec[")
+                and stripped.endswith("]")
+                or stripped.startswith("[")
+                and stripped.endswith("]")
+            ):
+                issues.append(ParseIssue(line_no, "Vectors must use vec[x, y, z]"))
                 continue
 
         objects.append(
@@ -69,7 +98,33 @@ def parse_scene(source: str) -> tuple[list[SceneObject], list[ParseIssue]]:
                 name=name,
                 expression=expression,
                 line_no=line_no,
+                anonymous=anonymous,
             )
         )
 
     return objects, issues
+
+
+def infer_kind(expression: str) -> str | None:
+    stripped = expression.strip()
+    compact = stripped.replace(" ", "")
+
+    if stripped.startswith("vec[") and stripped.endswith("]"):
+        return "vector"
+    if stripped.startswith("[") and stripped.endswith("]"):
+        return "vector"
+    if stripped.startswith("(") and stripped.endswith("]"):
+        return None
+    if stripped.startswith("(") and stripped.endswith(")"):
+        return "point"
+    if stripped.startswith("line(") and stripped.endswith(")"):
+        return "line"
+    if stripped.lower().startswith("point") and "dir" in stripped.lower():
+        return "line"
+    if "normal" in stripped.lower() and "point" in stripped.lower():
+        return "plane"
+    if "=" in compact and any(axis in compact for axis in "xyz"):
+        return "plane"
+    if stripped.startswith("plane(") and stripped.endswith(")"):
+        return "plane"
+    return None

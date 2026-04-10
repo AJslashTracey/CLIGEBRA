@@ -12,9 +12,11 @@ The current milestone focuses on the interface:
 Current scene syntax examples:
 
 - `point P1 = (0, 0, 0)`
-- `vector V1 = [1, 2, 0]`
-- `line L1 = point(0,0,0) dir(1,1,0)`
-- `plane A = 2x + y + 2z - 8 = 0`
+- `p1 = (0, 0, 0)`
+- `v1 = vec[1, 2, 0]`
+- `l1 = line(point(0,0,0), dir(1,1,0))`
+- `a = 2x + y + 2z - 8 = 0`
+- `vec[0, 0, 2]`
 
 ## Run
 

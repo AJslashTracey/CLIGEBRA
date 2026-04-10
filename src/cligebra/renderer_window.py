@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,6 +11,16 @@ import numpy as np
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import QApplication, QWidget
+
+
+LINE_CALL_RE = re.compile(
+    r"line\s*\(\s*point\s*(\([^)]*\))\s*,\s*dir\s*(\([^)]*\)|\[[^]]*\]|vec\[[^]]*\])\s*\)",
+    re.IGNORECASE,
+)
+LINE_LEGACY_RE = re.compile(
+    r"point\s*(\([^)]*\))\s*dir\s*(\([^)]*\)|\[[^]]*\]|vec\[[^]]*\])",
+    re.IGNORECASE,
+)
 
 
 @dataclass(slots=True)
@@ -37,10 +48,14 @@ def parse_point(expression: str) -> np.ndarray | None:
 
 
 def parse_vector(expression: str) -> np.ndarray | None:
-    vector = parse_triplet(expression, "[", "]")
+    stripped = expression.strip()
+    if stripped.startswith("vec[") and stripped.endswith("]"):
+        stripped = stripped[3:]
+
+    vector = parse_triplet(stripped, "[", "]")
     if vector is not None:
         return vector
-    return parse_triplet(expression, "(", ")")
+    return parse_triplet(stripped, "(", ")")
 
 
 def parse_plane_equation(expression: str) -> tuple[np.ndarray, float] | None:
@@ -263,9 +278,42 @@ class SceneWindow(QWidget):
     def draw_vector(self, painter: QPainter, viewport, vector: np.ndarray, name: str) -> None:
         start = self.project(np.zeros(3, dtype=float), viewport)
         end = self.project(vector, viewport)
-        painter.setPen(QPen(QColor("#74c0fc"), 2))
+        vector_color = QColor("#ff922b")
+        painter.setPen(QPen(vector_color, 3))
         painter.drawLine(*start, *end)
+        self.draw_arrowhead(painter, start, end, vector_color)
+        painter.setPen(QPen(QColor("#ffe8cc")))
         painter.drawText(int(end[0] + 6), int(end[1] - 6), name)
+
+    def draw_arrowhead(
+        self,
+        painter: QPainter,
+        start: tuple[float, float],
+        end: tuple[float, float],
+        color: QColor,
+    ) -> None:
+        dx = end[0] - start[0]
+        dy = end[1] - start[1]
+        length = math.hypot(dx, dy)
+        if length < 1.0:
+            return
+
+        ux = dx / length
+        uy = dy / length
+        size = 13.0
+        wing = 0.55
+        left = (
+            end[0] - size * (ux * math.cos(wing) - uy * math.sin(wing)),
+            end[1] - size * (uy * math.cos(wing) + ux * math.sin(wing)),
+        )
+        right = (
+            end[0] - size * (ux * math.cos(-wing) - uy * math.sin(-wing)),
+            end[1] - size * (uy * math.cos(-wing) + ux * math.sin(-wing)),
+        )
+
+        painter.setPen(QPen(color, 2))
+        painter.drawLine(*end, *left)
+        painter.drawLine(*end, *right)
 
     def draw_line(self, painter: QPainter, viewport, anchor: np.ndarray, direction: np.ndarray, name: str) -> None:
         unit = direction / np.linalg.norm(direction)
@@ -343,11 +391,9 @@ def compile_payload(scene_payload: dict) -> dict:
 
         if kind == "line":
             try:
-                left, right = expression.split("dir", 1)
-                anchor_expr = left.replace("point", "", 1).strip()
-                direction_expr = right.strip()
+                anchor_expr, direction_expr = parse_line_expression(expression)
             except ValueError:
-                issues.append(f"{name}: expected point(...) dir(...)")
+                issues.append(f"{name}: expected line(point(...), dir(...))")
                 continue
             anchor = parse_point(anchor_expr)
             direction = parse_vector(direction_expr)
@@ -400,6 +446,19 @@ def compile_payload(scene_payload: dict) -> dict:
         issues.append(f"{name}: unsupported {kind}")
 
     return {"objects": compiled_objects, "issues": issues, "status": scene_payload.get("status", "")}
+
+
+def parse_line_expression(expression: str) -> tuple[str, str]:
+    stripped = expression.strip()
+    call_match = LINE_CALL_RE.fullmatch(stripped)
+    if call_match is not None:
+        return call_match.group(1), call_match.group(2)
+
+    legacy_match = LINE_LEGACY_RE.fullmatch(stripped)
+    if legacy_match is not None:
+        return legacy_match.group(1), legacy_match.group(2)
+
+    raise ValueError("invalid line expression")
 
 
 def renderer_main(state_file: Path) -> None:

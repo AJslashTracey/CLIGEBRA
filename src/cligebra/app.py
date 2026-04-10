@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Literal
 
 from textual.app import App, ComposeResult
@@ -77,7 +78,8 @@ class ObjectsPane(Static):
         lines = ["Objects", ""]
         if objects:
             for obj in objects:
-                lines.append(f"{obj.name}")
+                title = obj.name if not obj.anonymous else f"{obj.name} anonymous"
+                lines.append(title)
                 lines.append(f"  {obj.kind}  line {obj.line_no}")
                 lines.append(f"  {obj.expression}")
                 lines.append("")
@@ -101,6 +103,13 @@ class StatusBar(Static):
 
 class CommandPalette(Input):
     pass
+
+
+@dataclass(frozen=True)
+class VimMotion:
+    start: tuple[int, int]
+    end: tuple[int, int]
+    linewise: bool = False
 
 
 class VimTextArea(TextArea):
@@ -137,12 +146,42 @@ class VimTextArea(TextArea):
                 self.enter_normal_mode()
                 event.stop()
                 event.prevent_default()
+                return
+            if self._handle_insert_mode_key(event):
+                event.stop()
+                event.prevent_default()
             return
 
         handled = self._handle_normal_mode_key(event)
         if handled:
             event.stop()
             event.prevent_default()
+
+    def _handle_insert_mode_key(self, event: Key) -> bool:
+        pairs = {
+            "(": ")",
+            "[": "]",
+            "{": "}",
+            '"': '"',
+            "'": "'",
+        }
+        closers = {")", "]", "}", '"', "'"}
+        character = event.character
+
+        if character in pairs:
+            row, column = self.cursor_location
+            self.insert(character + pairs[character], (row, column))
+            self.move_cursor((row, column + 1))
+            return True
+
+        if character in closers:
+            row, column = self.cursor_location
+            lines = self._current_lines()
+            if row < len(lines) and column < len(lines[row]) and lines[row][column] == character:
+                self.move_cursor((row, column + 1))
+                return True
+
+        return False
 
     def _handle_normal_mode_key(self, event: Key) -> bool:
         key = event.key
