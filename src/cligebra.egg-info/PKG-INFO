@@ -6,6 +6,7 @@ Requires-Python: >=3.11
 Description-Content-Type: text/markdown
 Requires-Dist: textual>=0.61.0
 Requires-Dist: numpy>=1.26
+Requires-Dist: pyvista>=0.44
 
 # CLIGEBRA
 
@@ -16,9 +17,30 @@ The current milestone focuses on the interface:
 - a full-screen TUI shell
 - an editable scene-definition buffer
 - a live object list derived from the buffer
-- a render placeholder panel that reflects parsed scene state
+- a separate PyVista scene window for 3D visualization
+
+Current scene syntax examples:
+
+- `point P1 = (0, 0, 0)`
+- `p1 = (0, 0, 0)`
+- `v1 = vec[1, 2, 0]`
+- `l1 = line(point(0,0,0), dir(1,1,0))`
+- `c1 = zyl((0,0,0), (0,0,5), 1)`
+- `zyl((0,0,0), (0,0,5), 1)`
+- `a = 2x + y + 2z - 8 = 0`
+- `vec[0, 0, 2]`
+
+Points use `(x, y, z)`, vectors use `vec[x, y, z]`, and cylinders use `zyl((x,y,z), (x,y,z), radius)`.
 
 ## Run
+
+Fastest local run:
+
+```bash
+python3 main.py
+```
+
+Installed entrypoint:
 
 ```bash
 python -m venv .venv
@@ -26,3 +48,5 @@ source .venv/bin/activate
 pip install -e .
 cligebra
 ```
+
+When the TUI starts it also launches a separate PyVista window that renders the scene.

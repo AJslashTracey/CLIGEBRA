@@ -1,16 +1,13 @@
 from __future__ import annotations
 
 import json
-import math
+import os
 import re
 import sys
-from dataclasses import dataclass
+import time
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import QTimer, Qt
-from PySide6.QtGui import QColor, QFont, QPainter, QPen
-from PySide6.QtWidgets import QApplication, QWidget
 
 
 LINE_CALL_RE = re.compile(
@@ -25,13 +22,6 @@ CYLINDER_RE = re.compile(
     r"(?:zyl|cyl|cylinder)\s*\(\s*(\([^)]*\))\s*,\s*(\([^)]*\))\s*,\s*([^,()]+)\s*\)",
     re.IGNORECASE,
 )
-
-
-@dataclass(slots=True)
-class CameraState:
-    yaw: float = math.radians(35)
-    pitch: float = math.radians(25)
-    scale: float = 42.0
 
 
 def parse_triplet(expression: str, open_char: str, close_char: str) -> np.ndarray | None:
@@ -115,318 +105,176 @@ def point_on_plane(normal: np.ndarray, d: float) -> np.ndarray:
     return point
 
 
-def plane_basis(normal: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    unit = normal / np.linalg.norm(normal)
-    reference = np.array([0.0, 0.0, 1.0], dtype=float)
-    if abs(np.dot(unit, reference)) > 0.9:
-        reference = np.array([0.0, 1.0, 0.0], dtype=float)
-    u = np.cross(unit, reference)
-    u = u / np.linalg.norm(u)
-    v = np.cross(unit, u)
-    return u, v
+def configure_renderer_environment() -> None:
+    temp_dir = Path(os.environ.get("TMPDIR", "/tmp"))
+    matplotlib_config = temp_dir / "cligebra_matplotlib"
+    font_cache = temp_dir / "cligebra_cache"
+    matplotlib_config.mkdir(parents=True, exist_ok=True)
+    font_cache.mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault("MPLCONFIGDIR", str(matplotlib_config))
+    os.environ.setdefault("XDG_CACHE_HOME", str(font_cache))
 
 
-def cylinder_basis(axis_unit: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    return plane_basis(axis_unit)
+class PyVistaSceneWindow:
+    def __init__(self, state_file: Path) -> None:
+        configure_renderer_environment()
 
+        import pyvista as pv
 
-def world_to_view(point: np.ndarray, camera: CameraState) -> np.ndarray:
-    cy = math.cos(camera.yaw)
-    sy = math.sin(camera.yaw)
-    cp = math.cos(camera.pitch)
-    sp = math.sin(camera.pitch)
-
-    yaw_matrix = np.array(
-        [
-            [cy, 0.0, sy],
-            [0.0, 1.0, 0.0],
-            [-sy, 0.0, cy],
-        ]
-    )
-    pitch_matrix = np.array(
-        [
-            [1.0, 0.0, 0.0],
-            [0.0, cp, -sp],
-            [0.0, sp, cp],
-        ]
-    )
-    return pitch_matrix @ (yaw_matrix @ point)
-
-
-class SceneWindow(QWidget):
-    def __init__(self, state_file: Path, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
         self.state_file = state_file
         self._last_text = ""
-        self.camera = CameraState()
         self.payload = {"objects": [], "issues": [], "status": "Waiting for scene..."}
-        self.setWindowTitle("CLIGEBRA Scene")
-        self.resize(980, 760)
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.pv = pv
+        self.plotter = pv.Plotter(window_size=(1100, 820), title="CLIGEBRA Scene")
+        self.plotter.set_background("#0c1117")
+        self.plotter.enable_anti_aliasing()
+        self.plotter.add_axes(line_width=4, labels_off=False)
+        self.plotter.show_grid(color="#273442")
+        self.plotter.camera_position = "iso"
 
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self.pull_updates)
-        self.timer.start(40)
+    def run(self) -> None:
+        self.pull_updates(force=True)
+        self.plotter.show(interactive_update=True, auto_close=False)
+        while not self.plotter.iren.interactor.GetDone():
+            self.pull_updates()
+            self.plotter.update()
+            time.sleep(0.04)
 
-    def pull_updates(self) -> None:
+    def pull_updates(self, *, force: bool = False) -> None:
         if not self.state_file.exists():
             return
 
         text = self.state_file.read_text(encoding="utf-8")
-        if not text or text == self._last_text:
+        if not text or (text == self._last_text and not force):
             return
 
         self._last_text = text
         payload = json.loads(text)
         self.payload = compile_payload(payload)
-        self.update()
+        self.draw_scene()
 
-    def keyPressEvent(self, event) -> None:  # type: ignore[override]
-        key = event.key()
-        changed = False
-        if key == Qt.Key.Key_Left:
-            self.camera.yaw -= math.radians(8)
-            changed = True
-        elif key == Qt.Key.Key_Right:
-            self.camera.yaw += math.radians(8)
-            changed = True
-        elif key == Qt.Key.Key_Up:
-            self.camera.pitch = min(self.camera.pitch + math.radians(8), math.radians(85))
-            changed = True
-        elif key == Qt.Key.Key_Down:
-            self.camera.pitch = max(self.camera.pitch - math.radians(8), math.radians(-85))
-            changed = True
-        elif key in {Qt.Key.Key_Plus, Qt.Key.Key_Equal}:
-            self.camera.scale *= 1.15
-            changed = True
-        elif key == Qt.Key.Key_Minus:
-            self.camera.scale = max(self.camera.scale / 1.15, 8.0)
-            changed = True
-
-        if changed:
-            self.update()
-            return
-        super().keyPressEvent(event)
-
-    def paintEvent(self, event) -> None:  # type: ignore[override]
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.fillRect(self.rect(), QColor("#0c1117"))
-
-        viewport = self.rect().adjusted(20, 20, -20, -90)
-        self.draw_grid(painter, viewport)
-        self.draw_axes(painter, viewport)
-        self.draw_objects(painter, viewport)
-        self.draw_overlay(painter)
-        painter.end()
-
-    def project(self, point: np.ndarray, viewport) -> tuple[float, float]:
-        view = world_to_view(point, self.camera)
-        x = viewport.center().x() + view[0] * self.camera.scale
-        y = viewport.center().y() - view[1] * self.camera.scale
-        return x, y
-
-    def draw_grid(self, painter: QPainter, viewport) -> None:
-        painter.setPen(QPen(QColor("#18222d"), 1))
-        for x in range(viewport.left(), viewport.right() + 1, 40):
-            painter.drawLine(x, viewport.top(), x, viewport.bottom())
-        for y in range(viewport.top(), viewport.bottom() + 1, 40):
-            painter.drawLine(viewport.left(), y, viewport.right(), y)
-
-    def draw_axes(self, painter: QPainter, viewport) -> None:
-        origin = np.zeros(3, dtype=float)
-        axes = [
-            (np.array([4.0, 0.0, 0.0], dtype=float), QColor("#ff6b6b"), "x"),
-            (np.array([0.0, 4.0, 0.0], dtype=float), QColor("#51cf66"), "y"),
-            (np.array([0.0, 0.0, 4.0], dtype=float), QColor("#4dabf7"), "z"),
-        ]
-        origin_xy = self.project(origin, viewport)
-        for axis_end, color, label in axes:
-            painter.setPen(QPen(color, 2))
-            end_xy = self.project(axis_end, viewport)
-            painter.drawLine(*origin_xy, *end_xy)
-            painter.drawText(int(end_xy[0] + 4), int(end_xy[1] - 4), label)
-
-        painter.setBrush(QColor("#f8f9fa"))
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawEllipse(int(origin_xy[0] - 3), int(origin_xy[1] - 3), 6, 6)
-
-    def draw_objects(self, painter: QPainter, viewport) -> None:
+    def draw_scene(self) -> None:
+        camera_position = self.plotter.camera_position
+        self.plotter.clear()
+        self.plotter.set_background("#0c1117")
+        self.plotter.add_axes(line_width=4, labels_off=False)
+        self.plotter.show_grid(color="#273442")
         for obj in self.payload.get("objects", []):
             kind = obj["kind"]
             if kind == "point":
-                self.draw_point(painter, viewport, np.array(obj["point"], dtype=float), obj["name"])
+                self.draw_point(np.array(obj["point"], dtype=float), obj["name"])
             elif kind == "vector":
-                self.draw_vector(painter, viewport, np.array(obj["vector"], dtype=float), obj["name"])
+                self.draw_vector(np.array(obj["vector"], dtype=float), obj["name"])
             elif kind == "line":
                 self.draw_line(
-                    painter,
-                    viewport,
                     np.array(obj["anchor"], dtype=float),
                     np.array(obj["direction"], dtype=float),
                     obj["name"],
                 )
             elif kind == "plane":
                 self.draw_plane(
-                    painter,
-                    viewport,
                     np.array(obj["point"], dtype=float),
                     np.array(obj["normal"], dtype=float),
                     obj["name"],
                 )
             elif kind == "cylinder":
                 self.draw_cylinder(
-                    painter,
-                    viewport,
                     np.array(obj["start"], dtype=float),
                     np.array(obj["end"], dtype=float),
                     float(obj["radius"]),
                     obj["name"],
                 )
+        self.draw_overlay()
+        self.plotter.camera_position = camera_position
+        self.plotter.render()
 
-    def draw_point(self, painter: QPainter, viewport, point: np.ndarray, name: str) -> None:
-        x, y = self.project(point, viewport)
-        painter.setPen(QPen(QColor("#ffd43b"), 2))
-        painter.setBrush(QColor("#ffd43b"))
-        painter.drawEllipse(int(x - 4), int(y - 4), 8, 8)
-        painter.setPen(QPen(QColor("#f8f9fa")))
-        painter.drawText(int(x + 6), int(y - 6), name)
+    def draw_point(self, point: np.ndarray, name: str) -> None:
+        self.plotter.add_points(point.reshape(1, 3), color="#ffd43b", point_size=14, render_points_as_spheres=True)
+        self.plotter.add_point_labels(
+            [point],
+            [name],
+            font_size=14,
+            text_color="#fff3bf",
+            shape=None,
+            point_size=0,
+        )
 
-    def draw_vector(self, painter: QPainter, viewport, vector: np.ndarray, name: str) -> None:
-        start = self.project(np.zeros(3, dtype=float), viewport)
-        end = self.project(vector, viewport)
-        vector_color = QColor("#ff922b")
-        painter.setPen(QPen(vector_color, 3))
-        painter.drawLine(*start, *end)
-        self.draw_arrowhead(painter, start, end, vector_color)
-        painter.setPen(QPen(QColor("#ffe8cc")))
-        painter.drawText(int(end[0] + 6), int(end[1] - 6), name)
-
-    def draw_arrowhead(
-        self,
-        painter: QPainter,
-        start: tuple[float, float],
-        end: tuple[float, float],
-        color: QColor,
-    ) -> None:
-        dx = end[0] - start[0]
-        dy = end[1] - start[1]
-        length = math.hypot(dx, dy)
-        if length < 1.0:
+    def draw_vector(self, vector: np.ndarray, name: str) -> None:
+        if np.allclose(vector, 0.0):
             return
-
-        ux = dx / length
-        uy = dy / length
-        size = 13.0
-        wing = 0.55
-        left = (
-            end[0] - size * (ux * math.cos(wing) - uy * math.sin(wing)),
-            end[1] - size * (uy * math.cos(wing) + ux * math.sin(wing)),
-        )
-        right = (
-            end[0] - size * (ux * math.cos(-wing) - uy * math.sin(-wing)),
-            end[1] - size * (uy * math.cos(-wing) + ux * math.sin(-wing)),
+        length = np.linalg.norm(vector)
+        arrow = self.pv.Arrow(start=(0.0, 0.0, 0.0), direction=vector / length, scale=length)
+        self.plotter.add_mesh(arrow, color="#ff922b", smooth_shading=True)
+        self.plotter.add_point_labels(
+            [vector],
+            [name],
+            font_size=14,
+            text_color="#ffe8cc",
+            shape=None,
+            point_size=0,
         )
 
-        painter.setPen(QPen(color, 2))
-        painter.drawLine(*end, *left)
-        painter.drawLine(*end, *right)
-
-    def draw_line(self, painter: QPainter, viewport, anchor: np.ndarray, direction: np.ndarray, name: str) -> None:
+    def draw_line(self, anchor: np.ndarray, direction: np.ndarray, name: str) -> None:
         unit = direction / np.linalg.norm(direction)
         start = anchor - unit * 8.0
         end = anchor + unit * 8.0
-        painter.setPen(QPen(QColor("#dee2e6"), 1))
-        painter.drawLine(*self.project(start, viewport), *self.project(end, viewport))
-        label_pos = self.project(anchor + unit * 1.5, viewport)
-        painter.drawText(int(label_pos[0] + 4), int(label_pos[1] - 4), name)
+        line = self.pv.Line(start, end)
+        self.plotter.add_mesh(line, color="#dee2e6", line_width=4)
+        self.plotter.add_point_labels(
+            [anchor + unit * 1.5],
+            [name],
+            font_size=14,
+            text_color="#f8f9fa",
+            shape=None,
+            point_size=0,
+        )
 
-    def draw_plane(self, painter: QPainter, viewport, point: np.ndarray, normal: np.ndarray, name: str) -> None:
-        u, v = plane_basis(normal)
-        painter.setPen(QPen(QColor("#495057"), 1))
-        for a in np.linspace(-4.0, 4.0, 5):
-            previous = None
-            for b in np.linspace(-4.0, 4.0, 16):
-                sample = point + u * a + v * b
-                current = self.project(sample, viewport)
-                if previous is not None:
-                    painter.drawLine(*previous, *current)
-                previous = current
-        for b in np.linspace(-4.0, 4.0, 5):
-            previous = None
-            for a in np.linspace(-4.0, 4.0, 16):
-                sample = point + u * a + v * b
-                current = self.project(sample, viewport)
-                if previous is not None:
-                    painter.drawLine(*previous, *current)
-                previous = current
-        label = self.project(point, viewport)
-        painter.setPen(QPen(QColor("#adb5bd")))
-        painter.drawText(int(label[0] + 6), int(label[1] - 6), name)
+    def draw_plane(self, point: np.ndarray, normal: np.ndarray, name: str) -> None:
+        plane = self.pv.Plane(center=point, direction=normal, i_size=8.0, j_size=8.0, i_resolution=4, j_resolution=4)
+        self.plotter.add_mesh(plane, color="#868e96", opacity=0.22, show_edges=True, edge_color="#adb5bd")
+        self.plotter.add_point_labels(
+            [point],
+            [name],
+            font_size=14,
+            text_color="#ced4da",
+            shape=None,
+            point_size=0,
+        )
 
-    def draw_cylinder(
-        self,
-        painter: QPainter,
-        viewport,
-        start: np.ndarray,
-        end: np.ndarray,
-        radius: float,
-        name: str,
-    ) -> None:
+    def draw_cylinder(self, start: np.ndarray, end: np.ndarray, radius: float, name: str) -> None:
         axis = end - start
         axis_norm = np.linalg.norm(axis)
         if axis_norm == 0.0:
             return
 
-        axis_unit = axis / axis_norm
-        u, v = cylinder_basis(axis_unit)
-        segments = 24
-        bottom_points: list[np.ndarray] = []
-        top_points: list[np.ndarray] = []
-
-        for index in range(segments):
-            angle = math.tau * index / segments
-            offset = radius * (math.cos(angle) * u + math.sin(angle) * v)
-            bottom_points.append(start + offset)
-            top_points.append(end + offset)
-
-        cylinder_color = QColor("#22d3c5")
-        painter.setPen(QPen(cylinder_color, 2))
-        for index in range(segments):
-            next_index = (index + 1) % segments
-            painter.drawLine(
-                *self.project(bottom_points[index], viewport),
-                *self.project(bottom_points[next_index], viewport),
-            )
-            painter.drawLine(
-                *self.project(top_points[index], viewport),
-                *self.project(top_points[next_index], viewport),
-            )
-            if index % 4 == 0:
-                painter.drawLine(
-                    *self.project(bottom_points[index], viewport),
-                    *self.project(top_points[index], viewport),
-                )
-
-        label = self.project((start + end) / 2 + u * radius * 1.2, viewport)
-        painter.setPen(QPen(QColor("#99f6e4")))
-        painter.drawText(int(label[0] + 6), int(label[1] - 6), name)
-
-    def draw_overlay(self, painter: QPainter) -> None:
-        painter.setPen(QPen(QColor("#e9ecef")))
-        painter.setFont(QFont("Menlo", 10))
-        footer_top = self.height() - 58
-        painter.drawText(24, footer_top, "CLIGEBRA Scene Window")
-        painter.drawText(
-            24,
-            footer_top + 20,
-            f"objects {len(self.payload.get('objects', []))}  issues {len(self.payload.get('issues', []))}",
+        cylinder = self.pv.Cylinder(
+            center=(start + end) / 2,
+            direction=axis,
+            radius=radius,
+            height=axis_norm,
+            resolution=24,
+            capping=False,
         )
-        painter.drawText(24, footer_top + 40, "camera: arrows rotate   +/- zoom")
+        self.plotter.add_mesh(cylinder, color="#22d3c5", opacity=0.35, show_edges=True, edge_color="#99f6e4")
+        self.plotter.add_point_labels(
+            [(start + end) / 2],
+            [name],
+            font_size=14,
+            text_color="#99f6e4",
+            shape=None,
+            point_size=0,
+        )
+
+    def draw_overlay(self) -> None:
+        lines = [
+            "CLIGEBRA Scene Window",
+            f"objects {len(self.payload.get('objects', []))}  issues {len(self.payload.get('issues', []))}",
+            "mouse: orbit / pan / zoom",
+        ]
         issues = self.payload.get("issues", [])
         if issues:
-            painter.setPen(QPen(QColor("#ff8787")))
-            painter.drawText(360, footer_top + 20, " | ".join(issues[:2]))
+            lines.append(" | ".join(issues[:2]))
+        self.plotter.add_text("\n".join(lines), position="lower_left", font_size=10, color="#e9ecef")
 
 
 def compile_payload(scene_payload: dict) -> dict:
@@ -573,10 +421,8 @@ def parse_cylinder_expression(expression: str) -> tuple[str, str, float]:
 
 
 def renderer_main(state_file: Path) -> None:
-    app = QApplication.instance() or QApplication([])
-    window = SceneWindow(state_file)
-    window.show()
-    app.exec()
+    window = PyVistaSceneWindow(state_file)
+    window.run()
 
 
 def main() -> None:

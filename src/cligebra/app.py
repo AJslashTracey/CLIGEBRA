@@ -32,8 +32,8 @@ class HelpScreen(ModalScreen[None]):
                         "?: toggle help",
                         "",
                         "Edit the scene buffer in the terminal.",
-                        "The 3D scene opens in a separate Qt window.",
-                        "Use that window for orbit/zoom controls.",
+                        "The 3D scene opens in a separate PyVista window.",
+                        "Use that window for mouse orbit, pan, and zoom.",
                     ]
                 ),
                 id="help-body",
@@ -59,13 +59,14 @@ class RendererPane(Static):
                     f"objects: {objects}",
                     f"issues: {issues}",
                     "",
-                    "The 3D viewport is no longer drawn in the terminal.",
-                    "A separate Python window shows the coordinate system",
-                    "and scene objects in 3D.",
+                    "The 3D viewport is drawn in a separate PyVista window.",
+                    "Use the mouse there to inspect the coordinate system",
+                    "and scene objects.",
                     "",
                     "scene window controls",
-                    "  arrows    rotate camera",
-                    "  +/-       zoom",
+                    "  drag      orbit camera",
+                    "  scroll    zoom",
+                    "  shift     pan",
                 ]
             )
         )
@@ -587,17 +588,14 @@ class CligebraApp(App[None]):
     CSS = """
     Screen {
         layout: vertical;
-        background: #10151c;
         color: #d7e0ea;
     }
 
     Header {
-        background: #18212b;
         color: #f5f7fa;
     }
 
     Footer {
-        background: #18212b;
         color: #9fb2c7;
     }
 
@@ -614,20 +612,17 @@ class CligebraApp(App[None]):
         height: 9;
         border: round #4b657f;
         padding: 1 2;
-        background: #0d131a;
     }
 
     #editor-pane {
         height: 1fr;
         border: round #5c7c9d;
-        background: #111922;
     }
 
     #sidebar {
         width: 34;
         min-width: 28;
         border-left: heavy #314154;
-        background: #111922;
     }
 
     #objects-pane {
@@ -653,14 +648,12 @@ class CligebraApp(App[None]):
         height: 1;
         padding: 0 1;
         color: #9fb2c7;
-        background: #18212b;
     }
 
     #help-dialog {
         width: 72;
         height: 18;
         border: double #88a8c8;
-        background: #10151c;
         padding: 1 2;
     }
     """

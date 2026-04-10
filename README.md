@@ -7,7 +7,7 @@ The current milestone focuses on the interface:
 - a full-screen TUI shell
 - an editable scene-definition buffer
 - a live object list derived from the buffer
-- a separate Python scene window for 3D visualization
+- a separate PyVista scene window for 3D visualization
 
 Current scene syntax examples:
 
@@ -39,4 +39,4 @@ pip install -e .
 cligebra
 ```
 
-When the TUI starts it also launches a separate Qt window that renders the scene.
+When the TUI starts it also launches a separate PyVista window that renders the scene.

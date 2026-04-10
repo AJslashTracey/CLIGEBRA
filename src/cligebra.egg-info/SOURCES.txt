@@ -2,6 +2,8 @@ README.md
 pyproject.toml
 src/cligebra/__init__.py
 src/cligebra/app.py
+src/cligebra/renderer_bridge.py
+src/cligebra/renderer_window.py
 src/cligebra/scene.py
 src/cligebra.egg-info/PKG-INFO
 src/cligebra.egg-info/SOURCES.txt
