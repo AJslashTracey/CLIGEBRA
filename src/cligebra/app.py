@@ -53,20 +53,8 @@ class RendererPane(Static):
         self.update(
             "\n".join(
                 [
-                    "External Scene Window",
-                    "",
-                    f"renderer: {state}",
-                    f"objects: {objects}",
-                    f"issues: {issues}",
-                    "",
-                    "The 3D viewport is drawn in a separate PyVista window.",
-                    "Use the mouse there to inspect the coordinate system",
-                    "and scene objects.",
-                    "",
-                    "scene window controls",
-                    "  drag      orbit camera",
-                    "  scroll    zoom",
-                    "  shift     pan",
+                    ""
+                   
                 ]
             )
         )

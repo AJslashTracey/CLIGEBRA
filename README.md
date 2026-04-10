@@ -58,3 +58,66 @@ cligebra
 ```
 
 `cligebra` and `cligebra tui` start the TUI. `cligebra watch <file>` starts the PyVista renderer for a scene file.
+
+## Neovim
+
+CLIGEBRA scene files are intended to work well as normal files edited in Neovim. Use `.clg` as the main extension:
+
+```bash
+nvim examples/cylinder.clg
+```
+
+Add this to your Neovim config to detect CLIGEBRA files and start the renderer with `<leader>cr`:
+
+```lua
+vim.filetype.add({
+  extension = {
+    clg = "cligebra",
+    cligebra = "cligebra",
+  },
+})
+
+vim.api.nvim_create_autocmd("FileType", {
+  pattern = "cligebra",
+  callback = function(event)
+    vim.keymap.set("n", "<leader>cr", function()
+      local file = vim.api.nvim_buf_get_name(0)
+
+      if file == "" then
+        vim.notify("Save this CLIGEBRA buffer before starting the renderer", vim.log.levels.WARN)
+        return
+      end
+
+      if vim.bo.modified then
+        vim.cmd.write()
+      end
+
+      vim.fn.jobstart({ "cligebra", "watch", file }, {
+        detach = true,
+      })
+
+      vim.notify("Started CLIGEBRA renderer for " .. vim.fn.fnamemodify(file, ":t"))
+    end, { buffer = event.buf, desc = "Start CLIGEBRA renderer" })
+  end,
+})
+```
+
+With LazyVim's default leader key, press:
+
+```text
+Space c r
+```
+
+The renderer opens in a PyVista window. Edit the scene and save with `:w`; `cligebra watch` reloads the file and updates the render.
+
+To confirm the buffer is using the right filetype:
+
+```vim
+:set filetype?
+```
+
+Expected:
+
+```text
+filetype=cligebra
+```
