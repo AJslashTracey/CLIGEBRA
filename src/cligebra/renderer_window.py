@@ -203,8 +203,30 @@ class PyVistaSceneWindow:
         if np.allclose(vector, 0.0):
             return
         length = np.linalg.norm(vector)
-        arrow = self.pv.Arrow(start=(0.0, 0.0, 0.0), direction=vector / length, scale=length)
-        self.plotter.add_mesh(arrow, color="#ff922b", smooth_shading=True)
+        unit = vector / length
+        tip_length = min(0.35, length * 0.35)
+        shaft_length = max(0.0, length - tip_length)
+        shaft_radius = min(0.035, length * 0.04)
+        tip_radius = min(0.12, length * 0.12)
+
+        if shaft_length > 0.0:
+            shaft = self.pv.Cylinder(
+                center=unit * (shaft_length / 2),
+                direction=unit,
+                radius=shaft_radius,
+                height=shaft_length,
+                resolution=18,
+            )
+            self.plotter.add_mesh(shaft, color="#ff922b", smooth_shading=True)
+
+        tip = self.pv.Cone(
+            center=vector - unit * (tip_length / 2),
+            direction=unit,
+            height=tip_length,
+            radius=tip_radius,
+            resolution=24,
+        )
+        self.plotter.add_mesh(tip, color="#ff922b", smooth_shading=True)
         self.plotter.add_point_labels(
             [vector],
             [name],

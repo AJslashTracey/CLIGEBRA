@@ -40,6 +40,18 @@ Fastest local run:
 python3 main.py
 ```
 
+Watch a scene file and update the renderer when it is saved:
+
+```bash
+cligebra watch scene.clg
+```
+
+Check a scene file without opening the renderer:
+
+```bash
+cligebra check scene.clg
+```
+
 Installed entrypoint:
 
 ```bash
@@ -49,4 +61,4 @@ pip install -e .
 cligebra
 ```
 
-When the TUI starts it also launches a separate PyVista window that renders the scene.
+`cligebra` and `cligebra tui` start the TUI. `cligebra watch <file>` starts the PyVista renderer for a scene file.

@@ -1,2 +1,2 @@
 [console_scripts]
-cligebra = cligebra.app:run
+cligebra = cligebra.cli:main

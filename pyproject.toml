@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.scripts]
-cligebra = "cligebra.app:run"
+cligebra = "cligebra.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

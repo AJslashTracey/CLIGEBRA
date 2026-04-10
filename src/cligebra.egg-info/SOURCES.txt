@@ -2,6 +2,7 @@ README.md
 pyproject.toml
 src/cligebra/__init__.py
 src/cligebra/app.py
+src/cligebra/cli.py
 src/cligebra/renderer_bridge.py
 src/cligebra/renderer_window.py
 src/cligebra/scene.py
