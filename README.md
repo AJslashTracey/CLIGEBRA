@@ -67,7 +67,18 @@ CLIGEBRA scene files are intended to work well as normal files edited in Neovim.
 nvim examples/cylinder.clg
 ```
 
-Add this to your Neovim config to detect CLIGEBRA files and start the renderer with `<leader>cr`:
+### Add the renderer shortcut
+
+Put the following Lua in your Neovim config. For a LazyVim-style config, a good place is:
+
+```text
+~/.config/nvim/lua/config/autocmds.lua
+```
+
+This does two things:
+
+- detects `.clg` and `.cligebra` files as `cligebra`
+- adds a buffer-local `<leader>cr` shortcut that starts `cligebra watch` for the current file
 
 ```lua
 vim.filetype.add({
@@ -102,13 +113,39 @@ vim.api.nvim_create_autocmd("FileType", {
 })
 ```
 
-With LazyVim's default leader key, press:
+With LazyVim's default leader key, `<leader>cr` means:
 
 ```text
 Space c r
 ```
 
-The renderer opens in a PyVista window. Edit the scene and save with `:w`; `cligebra watch` reloads the file and updates the render.
+### Use it
+
+Open a scene file:
+
+```bash
+nvim examples/cylinder.clg
+```
+
+Then press:
+
+```text
+Space c r
+```
+
+That starts this command in the background:
+
+```bash
+cligebra watch /absolute/path/to/current-file.clg
+```
+
+The PyVista renderer window opens. After that, edit the scene normally and save with:
+
+```vim
+:w
+```
+
+Every save updates the renderer.
 
 To confirm the buffer is using the right filetype:
 
@@ -121,3 +158,5 @@ Expected:
 ```text
 filetype=cligebra
 ```
+
+If `Space c r` does nothing, restart Neovim after adding the config, reopen the `.clg` file, and check `:set filetype?`.
