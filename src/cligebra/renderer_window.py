@@ -105,17 +105,6 @@ def point_on_plane(normal: np.ndarray, d: float) -> np.ndarray:
     return point
 
 
-def orthonormal_basis(normal: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    unit = normal / np.linalg.norm(normal)
-    reference = np.array([0.0, 0.0, 1.0], dtype=float)
-    if abs(np.dot(unit, reference)) > 0.9:
-        reference = np.array([0.0, 1.0, 0.0], dtype=float)
-    u = np.cross(unit, reference)
-    u = u / np.linalg.norm(u)
-    v = np.cross(unit, u)
-    return u, v
-
-
 def configure_renderer_environment() -> None:
     temp_dir = Path(os.environ.get("TMPDIR", "/tmp"))
     matplotlib_config = temp_dir / "cligebra_matplotlib"
@@ -136,7 +125,9 @@ class PyVistaSceneWindow:
         self._last_text = ""
         self.payload = {"objects": [], "issues": [], "status": "Waiting for scene..."}
         self.pv = pv
-        self._scene_reference_points: list[np.ndarray] = []
+        self._finite_scene_points: list[np.ndarray] = []
+        self._finite_scene_center = np.zeros(3, dtype=float)
+        self._finite_scene_radius = 4.0
         self.plotter = pv.Plotter(window_size=(1100, 820), title="CLIGEBRA Scene")
         self.plotter.set_background("#0c1117")
         self.plotter.enable_anti_aliasing()
@@ -171,7 +162,8 @@ class PyVistaSceneWindow:
         self.plotter.set_background("#0c1117")
         self.plotter.add_axes(line_width=4, labels_off=False)
         self.plotter.show_grid(color="#273442")
-        self._scene_reference_points = self.scene_reference_points()
+        self._finite_scene_points = self.finite_scene_points()
+        self._finite_scene_center, self._finite_scene_radius = self.finite_scene_bounds()
         for obj in self.payload.get("objects", []):
             kind = obj["kind"]
             if kind == "point":
@@ -251,13 +243,14 @@ class PyVistaSceneWindow:
 
     def draw_line(self, anchor: np.ndarray, direction: np.ndarray, name: str) -> None:
         unit = direction / np.linalg.norm(direction)
-        line_half_extent = self.line_render_half_extent(anchor, unit)
-        start = anchor - unit * line_half_extent
-        end = anchor + unit * line_half_extent
+        line_center = self.line_render_center(anchor, unit)
+        line_half_extent = self.line_render_half_extent()
+        start = line_center - unit * line_half_extent
+        end = line_center + unit * line_half_extent
         line = self.pv.Line(start, end)
         self.plotter.add_mesh(line, color="#dee2e6", line_width=4)
         self.plotter.add_point_labels(
-            [anchor + unit * 1.5],
+            [line_center + unit * min(1.5, line_half_extent * 0.2)],
             [name],
             font_size=14,
             text_color="#f8f9fa",
@@ -266,9 +259,10 @@ class PyVistaSceneWindow:
         )
 
     def draw_plane(self, point: np.ndarray, normal: np.ndarray, name: str) -> None:
-        plane_size = self.plane_render_size(point, normal)
+        plane_center = self.plane_render_center(point, normal)
+        plane_size = self.plane_render_size()
         plane = self.pv.Plane(
-            center=point,
+            center=plane_center,
             direction=normal,
             i_size=plane_size,
             j_size=plane_size,
@@ -277,7 +271,7 @@ class PyVistaSceneWindow:
         )
         self.plotter.add_mesh(plane, color="#868e96", opacity=0.22, show_edges=True, edge_color="#adb5bd")
         self.plotter.add_point_labels(
-            [point],
+            [plane_center],
             [name],
             font_size=14,
             text_color="#ced4da",
@@ -318,8 +312,8 @@ class PyVistaSceneWindow:
             lines.append(" | ".join(issues[:2]))
         self.plotter.add_text("\n".join(lines), position="lower_left", font_size=10, color="#e9ecef")
 
-    def scene_reference_points(self) -> list[np.ndarray]:
-        points = [np.zeros(3, dtype=float)]
+    def finite_scene_points(self) -> list[np.ndarray]:
+        points: list[np.ndarray] = []
 
         for obj in self.payload.get("objects", []):
             kind = obj["kind"]
@@ -327,14 +321,6 @@ class PyVistaSceneWindow:
                 points.append(np.array(obj["point"], dtype=float))
             elif kind == "vector":
                 points.append(np.array(obj["vector"], dtype=float))
-            elif kind == "line":
-                anchor = np.array(obj["anchor"], dtype=float)
-                direction = np.array(obj["direction"], dtype=float)
-                if not np.allclose(direction, 0.0):
-                    unit = direction / np.linalg.norm(direction)
-                    points.append(anchor)
-            elif kind == "plane":
-                points.append(np.array(obj["point"], dtype=float))
             elif kind == "cylinder":
                 start = np.array(obj["start"], dtype=float)
                 end = np.array(obj["end"], dtype=float)
@@ -351,34 +337,32 @@ class PyVistaSceneWindow:
                 for offset in offsets:
                     points.extend([start + offset, end + offset])
 
-        return points
+        return points or [np.zeros(3, dtype=float)]
 
-    def plane_render_size(self, point: np.ndarray, normal: np.ndarray) -> float:
-        u, v = orthonormal_basis(normal)
-        half_extent = 0.0
+    def finite_scene_bounds(self) -> tuple[np.ndarray, float]:
+        if not self._finite_scene_points:
+            return np.zeros(3, dtype=float), 4.0
 
-        for scene_point in self._scene_reference_points:
-            relative = scene_point - point
-            half_extent = max(
-                half_extent,
-                abs(float(np.dot(relative, u))),
-                abs(float(np.dot(relative, v))),
-            )
+        points = np.array(self._finite_scene_points, dtype=float)
+        center = points.mean(axis=0)
+        distances = np.linalg.norm(points - center, axis=1)
+        radius = max(4.0, float(distances.max(initial=0.0)))
+        return center, radius
 
-        margin = max(2.0, half_extent * 0.2)
-        return max(16.0, (half_extent + margin) * 2.0)
+    def plane_render_center(self, point: np.ndarray, normal: np.ndarray) -> np.ndarray:
+        unit = normal / np.linalg.norm(normal)
+        relative = self._finite_scene_center - point
+        return self._finite_scene_center - unit * float(np.dot(relative, unit))
 
-    def line_render_half_extent(self, anchor: np.ndarray, unit: np.ndarray) -> float:
-        half_extent = 0.0
+    def plane_render_size(self) -> float:
+        return max(16.0, self._finite_scene_radius * 3.0)
 
-        for scene_point in self._scene_reference_points:
-            relative = scene_point - anchor
-            signed_parallel_distance = float(np.dot(relative, unit))
-            perpendicular_distance = np.linalg.norm(relative - signed_parallel_distance * unit)
-            half_extent = max(half_extent, abs(signed_parallel_distance), perpendicular_distance)
+    def line_render_center(self, anchor: np.ndarray, unit: np.ndarray) -> np.ndarray:
+        relative = self._finite_scene_center - anchor
+        return anchor + unit * float(np.dot(relative, unit))
 
-        margin = max(2.0, half_extent * 0.2)
-        return max(8.0, half_extent + margin)
+    def line_render_half_extent(self) -> float:
+        return max(8.0, self._finite_scene_radius * 1.8)
 
 
 def compile_payload(scene_payload: dict) -> dict:
