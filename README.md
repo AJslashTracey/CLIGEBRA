@@ -15,12 +15,12 @@ Current scene syntax examples:
 - `p1 = (0, 0, 0)`
 - `v1 = vec[1, 2, 0]`
 - `l1 = line(point(0,0,0), dir(1,1,0))`
-- `c1 = zyl((0,0,0), (0,0,5), 1)`
-- `zyl((0,0,0), (0,0,5), 1)`
+- `c1 = cyl((0,0,0), (0,0,5), 1)`
+- `cyl((0,0,0), (0,0,5), 1)`
 - `a = 2x + y + 2z - 8 = 0`
 - `vec[0, 0, 2]`
 
-Points use `(x, y, z)`, vectors use `vec[x, y, z]`, and cylinders use `zyl((x,y,z), (x,y,z), radius)`.
+Points use `(x, y, z)`, vectors use `vec[x, y, z]`, and cylinders use `cyl((x,y,z), (x,y,z), radius)`.
 
 ## Run
 

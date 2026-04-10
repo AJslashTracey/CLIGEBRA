@@ -10,20 +10,10 @@ from pathlib import Path
 import numpy as np
 
 
-LINE_CALL_RE = re.compile(
-    r"line\s*\(\s*point\s*(\([^)]*\))\s*,\s*dir\s*(\([^)]*\)|\[[^]]*\]|vec\[[^]]*\])\s*\)",
-    re.IGNORECASE,
-)
 LINE_LEGACY_RE = re.compile(
     r"point\s*(\([^)]*\))\s*dir\s*(\([^)]*\)|\[[^]]*\]|vec\[[^]]*\])",
     re.IGNORECASE,
 )
-CYLINDER_RE = re.compile(
-    r"(?:zyl|cyl|cylinder)\s*\(\s*(\([^)]*\))\s*,\s*(\([^)]*\))\s*,\s*([^,()]+)\s*\)",
-    re.IGNORECASE,
-)
-
-
 def parse_triplet(expression: str, open_char: str, close_char: str) -> np.ndarray | None:
     stripped = expression.strip()
     if not (stripped.startswith(open_char) and stripped.endswith(close_char)):
@@ -50,6 +40,65 @@ def parse_vector(expression: str) -> np.ndarray | None:
     if vector is not None:
         return vector
     return parse_triplet(stripped, "(", ")")
+
+
+def resolve_point(expression: str, named_points: dict[str, np.ndarray]) -> np.ndarray | None:
+    stripped = expression.strip()
+    if stripped.lower().startswith("point(") and stripped.endswith(")"):
+        stripped = stripped[stripped.find("(") :]
+    point = parse_point(stripped)
+    if point is not None:
+        return point
+    return named_points.get(stripped)
+
+
+def resolve_vector(expression: str, named_vectors: dict[str, np.ndarray]) -> np.ndarray | None:
+    stripped = expression.strip()
+    if stripped.lower().startswith("dir(") and stripped.endswith(")"):
+        stripped = stripped[stripped.find("(") :]
+    vector = parse_vector(stripped)
+    if vector is not None:
+        return vector
+    return named_vectors.get(stripped)
+
+
+def split_call_arguments(arguments: str) -> list[str]:
+    parts: list[str] = []
+    current: list[str] = []
+    paren_depth = 0
+    bracket_depth = 0
+
+    for char in arguments:
+        if char == "," and paren_depth == 0 and bracket_depth == 0:
+            parts.append("".join(current).strip())
+            current = []
+            continue
+        if char == "(":
+            paren_depth += 1
+        elif char == ")":
+            paren_depth -= 1
+        elif char == "[":
+            bracket_depth += 1
+        elif char == "]":
+            bracket_depth -= 1
+        current.append(char)
+
+    if current:
+        parts.append("".join(current).strip())
+
+    if paren_depth != 0 or bracket_depth != 0:
+        raise ValueError("unbalanced delimiters")
+
+    return parts
+
+
+def parse_constructor_call(expression: str, names: tuple[str, ...]) -> list[str]:
+    stripped = expression.strip()
+    name_pattern = "|".join(re.escape(name) for name in names)
+    call_match = re.fullmatch(rf"(?:{name_pattern})\s*\((.*)\)", stripped, re.IGNORECASE)
+    if call_match is None:
+        raise ValueError("invalid constructor call")
+    return split_call_arguments(call_match.group(1))
 
 
 def parse_plane_equation(expression: str) -> tuple[np.ndarray, float] | None:
@@ -368,6 +417,8 @@ class PyVistaSceneWindow:
 def compile_payload(scene_payload: dict) -> dict:
     compiled_objects: list[dict] = []
     issues: list[str] = list(scene_payload.get("parse_issues", []))
+    named_points: dict[str, np.ndarray] = {}
+    named_vectors: dict[str, np.ndarray] = {}
 
     for obj in scene_payload.get("objects", []):
         kind = obj["kind"]
@@ -379,6 +430,7 @@ def compile_payload(scene_payload: dict) -> dict:
             if point is None:
                 issues.append(f"{name}: invalid point syntax")
                 continue
+            named_points[name] = point
             compiled_objects.append({"kind": "point", "name": name, "point": point.tolist()})
             continue
 
@@ -387,19 +439,15 @@ def compile_payload(scene_payload: dict) -> dict:
             if vector is None:
                 issues.append(f"{name}: invalid vector syntax")
                 continue
+            named_vectors[name] = vector
             compiled_objects.append({"kind": "vector", "name": name, "vector": vector.tolist()})
             continue
 
         if kind == "line":
             try:
-                anchor_expr, direction_expr = parse_line_expression(expression)
-            except ValueError:
-                issues.append(f"{name}: expected line(point(...), dir(...))")
-                continue
-            anchor = parse_point(anchor_expr)
-            direction = parse_vector(direction_expr)
-            if anchor is None or direction is None or np.allclose(direction, 0.0):
-                issues.append(f"{name}: invalid line geometry")
+                anchor, direction = compile_line_expression(expression, named_points, named_vectors)
+            except ValueError as error:
+                issues.append(f"{name}: {error}")
                 continue
             compiled_objects.append(
                 {
@@ -420,8 +468,14 @@ def compile_payload(scene_payload: dict) -> dict:
                 except ValueError:
                     issues.append(f"{name}: invalid plane syntax")
                     continue
-                point = parse_point(point_expr)
-                normal = parse_vector(normal_expr)
+                point = resolve_point(point_expr, named_points)
+                normal = resolve_vector(normal_expr, named_vectors)
+            elif expression.strip().startswith("plane("):
+                try:
+                    point, normal = compile_plane_constructor(expression, named_points, named_vectors)
+                except ValueError as error:
+                    issues.append(f"{name}: {error}")
+                    continue
             else:
                 equation = parse_plane_equation(expression)
                 if equation is None:
@@ -451,11 +505,11 @@ def compile_payload(scene_payload: dict) -> dict:
                 issues.append(f"{name}: {error}")
                 continue
 
-            start = parse_point(start_expr)
-            end = parse_point(end_expr)
+            start = resolve_point(start_expr, named_points)
+            end = resolve_point(end_expr, named_points)
             axis = None if start is None or end is None else end - start
             if start is None or end is None:
-                issues.append(f"{name}: cylinder points must use (x,y,z)")
+                issues.append(f"{name}: cylinder endpoints must be points or point names")
                 continue
             if radius <= 0.0:
                 issues.append(f"{name}: cylinder radius must be greater than 0")
@@ -482,10 +536,6 @@ def compile_payload(scene_payload: dict) -> dict:
 
 def parse_line_expression(expression: str) -> tuple[str, str]:
     stripped = expression.strip()
-    call_match = LINE_CALL_RE.fullmatch(stripped)
-    if call_match is not None:
-        return call_match.group(1), call_match.group(2)
-
     legacy_match = LINE_LEGACY_RE.fullmatch(stripped)
     if legacy_match is not None:
         return legacy_match.group(1), legacy_match.group(2)
@@ -493,13 +543,105 @@ def parse_line_expression(expression: str) -> tuple[str, str]:
     raise ValueError("invalid line expression")
 
 
+def compile_line_expression(
+    expression: str,
+    named_points: dict[str, np.ndarray],
+    named_vectors: dict[str, np.ndarray],
+) -> tuple[np.ndarray, np.ndarray]:
+    stripped = expression.strip()
+
+    try:
+        first_arg, second_arg = parse_constructor_call(stripped, ("line",))
+    except ValueError:
+        anchor_expr, direction_expr = parse_line_expression(expression)
+        anchor = resolve_point(anchor_expr, named_points)
+        direction = resolve_vector(direction_expr, named_vectors)
+        if anchor is None or direction is None or np.allclose(direction, 0.0):
+            raise ValueError("invalid line geometry")
+        return anchor, direction
+
+    if any(not part for part in (first_arg, second_arg)):
+        raise ValueError("expected line(point, vector) or line(point, point)")
+
+    anchor = resolve_point(first_arg, named_points)
+    if anchor is None:
+        raise ValueError("line anchor must be a point or point name")
+
+    second_point = resolve_point(second_arg, named_points)
+    if second_point is not None:
+        direction = second_point - anchor
+        if np.allclose(direction, 0.0):
+            raise ValueError("line points must be different")
+        return anchor, direction
+
+    direction = resolve_vector(second_arg, named_vectors)
+    if direction is not None and not np.allclose(direction, 0.0):
+        return anchor, direction
+
+    raise ValueError("line second argument must be a vector, point, or object name")
+
+
+def compile_plane_constructor(
+    expression: str,
+    named_points: dict[str, np.ndarray],
+    named_vectors: dict[str, np.ndarray],
+) -> tuple[np.ndarray, np.ndarray]:
+    try:
+        args = parse_constructor_call(expression, ("plane",))
+    except ValueError as error:
+        raise ValueError("invalid plane syntax") from error
+
+    if len(args) == 2:
+        point = resolve_point(args[0], named_points)
+        normal = resolve_vector(args[1], named_vectors)
+        if point is None:
+            raise ValueError("plane first argument must be a point or point name")
+        if normal is None or np.allclose(normal, 0.0):
+            raise ValueError("plane second argument must be a non-zero vector or vector name")
+        return point, normal
+
+    if len(args) != 3:
+        raise ValueError("expected plane(point, normal), plane(p1, p2, p3), or plane(point, v1, v2)")
+
+    point = resolve_point(args[0], named_points)
+    if point is None:
+        raise ValueError("plane first argument must be a point or point name")
+
+    second_point = resolve_point(args[1], named_points)
+    third_point = resolve_point(args[2], named_points)
+    if second_point is not None and third_point is not None:
+        v1 = second_point - point
+        v2 = third_point - point
+        normal = np.cross(v1, v2)
+        if np.allclose(normal, 0.0):
+            raise ValueError("plane points must not be collinear")
+        return point, normal
+
+    v1 = resolve_vector(args[1], named_vectors)
+    v2 = resolve_vector(args[2], named_vectors)
+    if v1 is None or v2 is None:
+        raise ValueError("plane arguments must be three points or one point plus two vectors")
+
+    normal = np.cross(v1, v2)
+    if np.allclose(normal, 0.0):
+        raise ValueError("plane vectors must not be parallel")
+    return point, normal
+
+
 def parse_cylinder_expression(expression: str) -> tuple[str, str, float]:
     stripped = expression.strip()
-    match = CYLINDER_RE.fullmatch(stripped)
-    if match is None:
-        raise ValueError("expected zyl((x,y,z), (x,y,z), radius)")
+    call_match = re.fullmatch(r"(?:zyl|cyl|cylinder)\s*\((.*)\)", stripped, re.IGNORECASE)
+    if call_match is None:
+        raise ValueError("expected cyl((x,y,z), (x,y,z), radius)")
 
-    start_expr, end_expr, radius_expr = match.groups()
+    try:
+        start_expr, end_expr, radius_expr = split_call_arguments(call_match.group(1))
+    except ValueError as error:
+        raise ValueError("expected cyl((x,y,z), (x,y,z), radius)") from error
+
+    if any(not part for part in (start_expr, end_expr, radius_expr)):
+        raise ValueError("expected cyl((x,y,z), (x,y,z), radius)")
+
     try:
         radius = float(radius_expr.strip())
     except ValueError as error:
