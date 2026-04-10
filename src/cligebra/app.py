@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical
+from textual.events import Key
 from textual.reactive import reactive
 from textual.screen import ModalScreen
 from textual.widgets import Footer, Header, Input, Label, Static, TextArea
 
+from cligebra.renderer_bridge import RendererBridge
 from cligebra.scene import ParseIssue, SCENE_SAMPLE, SceneObject, parse_scene
 
 
@@ -18,16 +22,17 @@ class HelpScreen(ModalScreen[None]):
                         "CLIGEBRA Interface",
                         "",
                         "Tab / Shift+Tab: move focus",
-                        "Ctrl+R: focus render pane",
                         "Ctrl+E: focus editor pane",
+                        "Ctrl+R: focus renderer info pane",
                         "Ctrl+O: focus objects pane",
                         "Ctrl+P: focus command palette",
                         "Ctrl+S: reparse scene buffer",
                         "Ctrl+G: load sample scene",
                         "?: toggle help",
                         "",
-                        "Edit the scene buffer like source code.",
-                        "The sidebar reflects parsed objects.",
+                        "Edit the scene buffer in the terminal.",
+                        "The 3D scene opens in a separate Qt window.",
+                        "Use that window for orbit/zoom controls.",
                     ]
                 ),
                 id="help-body",
@@ -39,50 +44,30 @@ class HelpScreen(ModalScreen[None]):
         self.dismiss()
 
 
-class RenderPane(Static):
+class RendererPane(Static):
     can_focus = True
-    objects: reactive[list[SceneObject]] = reactive(list)
-    issues: reactive[list[ParseIssue]] = reactive(list)
 
-    def update_scene(self, objects: list[SceneObject], issues: list[ParseIssue]) -> None:
-        self.objects = objects
-        self.issues = issues
-        self.update(self._build_view())
-
-    def _build_view(self) -> str:
-        lines = [
-            "Render Viewport",
-            "",
-            "The live renderer will project scene geometry here.",
-            "For now, this pane reflects the parsed scene state.",
-            "",
-            f"objects: {len(self.objects)}",
-            f"errors: {len(self.issues)}",
-            "",
-        ]
-
-        if self.objects:
-            lines.append("visible objects")
-            for obj in self.objects[:8]:
-                lines.append(f"  {obj.kind:<8} {obj.name:<10} line {obj.line_no}")
-        else:
-            lines.append("No objects parsed.")
-
-        if self.issues:
-            lines.extend(["", "issues"])
-            for issue in self.issues[:5]:
-                lines.append(f"  line {issue.line_no}: {issue.message}")
-
-        lines.extend(
-            [
-                "",
-                "planned controls",
-                "  h j k l / arrows  move camera",
-                "  +/-               zoom",
-                "  :                 command palette",
-            ]
+    def set_renderer_status(self, *, connected: bool, objects: int, issues: int) -> None:
+        state = "connected" if connected else "starting"
+        self.update(
+            "\n".join(
+                [
+                    "External Scene Window",
+                    "",
+                    f"renderer: {state}",
+                    f"objects: {objects}",
+                    f"issues: {issues}",
+                    "",
+                    "The 3D viewport is no longer drawn in the terminal.",
+                    "A separate Python window shows the coordinate system",
+                    "and scene objects in 3D.",
+                    "",
+                    "scene window controls",
+                    "  arrows    rotate camera",
+                    "  +/-       zoom",
+                ]
+            )
         )
-        return "\n".join(lines)
 
 
 class ObjectsPane(Static):
@@ -118,6 +103,203 @@ class CommandPalette(Input):
     pass
 
 
+class VimTextArea(TextArea):
+    mode: reactive[Literal["NORMAL", "INSERT"]] = reactive("NORMAL")
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._pending_operator: str | None = None
+        self._register = ""
+        self._register_linewise = False
+
+    def watch_mode(self, mode: str) -> None:
+        try:
+            app = self.app
+        except Exception:
+            return
+        if app is not None and hasattr(app, "set_editor_mode"):
+            app.set_editor_mode(mode)
+
+    def enter_normal_mode(self) -> None:
+        self.mode = "NORMAL"
+        self._pending_operator = None
+
+    def enter_insert_mode(self) -> None:
+        self.mode = "INSERT"
+        self._pending_operator = None
+
+    def on_focus(self) -> None:
+        self.watch_mode(self.mode)
+
+    def on_key(self, event: Key) -> None:
+        if self.mode == "INSERT":
+            if event.key == "escape":
+                self.enter_normal_mode()
+                event.stop()
+                event.prevent_default()
+            return
+
+        handled = self._handle_normal_mode_key(event)
+        if handled:
+            event.stop()
+            event.prevent_default()
+
+    def _handle_normal_mode_key(self, event: Key) -> bool:
+        key = event.key
+        character = event.character
+
+        if key == "escape":
+            self._pending_operator = None
+            self._set_status("NORMAL")
+            return True
+
+        if self._pending_operator is not None:
+            operator = self._pending_operator
+            self._pending_operator = None
+            if operator == key == "d":
+                self._delete_current_line()
+                return True
+            if operator == key == "y":
+                self._yank_current_line()
+                return True
+            self._set_status(f"NORMAL  cancelled {operator}")
+            return True
+
+        if key == "i":
+            self.enter_insert_mode()
+            return True
+        if key == "a":
+            self.action_cursor_right()
+            self.enter_insert_mode()
+            return True
+        if key == "h":
+            self.action_cursor_left()
+            return True
+        if key == "j":
+            self.action_cursor_down()
+            return True
+        if key == "k":
+            self.action_cursor_up()
+            return True
+        if key == "l":
+            self.action_cursor_right()
+            return True
+        if key == "0":
+            self.action_cursor_line_start()
+            return True
+        if key == "$":
+            self.action_cursor_line_end()
+            return True
+        if key == "w":
+            self.move_cursor(self.get_cursor_word_right_location())
+            return True
+        if key == "b":
+            self.move_cursor(self.get_cursor_word_left_location())
+            return True
+        if key == "x":
+            self._delete_under_cursor()
+            return True
+        if key in {"d", "y"}:
+            self._pending_operator = key
+            self._set_status(f"NORMAL  {key}")
+            return True
+        if key == "p":
+            self._put_register()
+            return True
+        if key == ":" or character == ":":
+            try:
+                app = self.app
+            except Exception:
+                return True
+            if app is not None and hasattr(app, "focus_command_with_prefix"):
+                app.focus_command_with_prefix(":")
+            return True
+
+        return True
+
+    def _current_lines(self) -> list[str]:
+        return self.text.split("\n")
+
+    def _delete_under_cursor(self) -> None:
+        row, column = self.cursor_location
+        lines = self._current_lines()
+        line = lines[row]
+
+        if column < len(line):
+            deleted = line[column]
+            self._register = deleted
+            self._register_linewise = False
+            self.delete((row, column), (row, column + 1))
+            self.move_cursor((row, column))
+            return
+
+        if row < len(lines) - 1:
+            self._register = "\n"
+            self._register_linewise = False
+            self.delete((row, column), (row + 1, 0))
+            self.move_cursor((row, column))
+
+    def _delete_current_line(self) -> None:
+        row, _ = self.cursor_location
+        lines = self._current_lines()
+        line = lines[row]
+
+        self._register = line + ("\n" if row < len(lines) - 1 else "")
+        self._register_linewise = True
+
+        if len(lines) == 1:
+            self.load_text("")
+            self.move_cursor((0, 0))
+        else:
+            end = (row + 1, 0) if row < len(lines) - 1 else (row, len(line))
+            self.delete((row, 0), end)
+            new_row = min(row, len(self._current_lines()) - 1)
+            self.move_cursor((new_row, 0))
+
+        self._set_status("NORMAL  deleted line")
+
+    def _yank_current_line(self) -> None:
+        row, _ = self.cursor_location
+        lines = self._current_lines()
+        line = lines[row]
+        self._register = line + ("\n" if row < len(lines) - 1 else "")
+        self._register_linewise = True
+        self._set_status("NORMAL  yanked line")
+
+    def _put_register(self) -> None:
+        if not self._register:
+            return
+
+        row, column = self.cursor_location
+        lines = self._current_lines()
+
+        if self._register_linewise:
+            insert_line = self._register.rstrip("\n")
+            if row < len(lines) - 1:
+                self.insert(insert_line + "\n", (row + 1, 0))
+                self.move_cursor((row + 1, 0))
+            else:
+                suffix = ("\n" if self.text else "") + insert_line
+                self.insert(suffix, (row, len(lines[row])))
+                target_row = row + 1 if self.text else 0
+                self.move_cursor((target_row, 0))
+            self._set_status("NORMAL  put line")
+            return
+
+        insert_at = (row, min(column + 1, len(lines[row])))
+        self.insert(self._register, insert_at)
+        self.move_cursor(insert_at)
+        self._set_status("NORMAL  put")
+
+    def _set_status(self, message: str) -> None:
+        try:
+            app = self.app
+        except Exception:
+            return
+        if app is not None and hasattr(app, "set_transient_status"):
+            app.set_transient_status(message)
+
+
 class CligebraApp(App[None]):
     CSS = """
     Screen {
@@ -145,23 +327,23 @@ class CligebraApp(App[None]):
         height: 1fr;
     }
 
-    #sidebar {
-        width: 34;
-        min-width: 28;
-        border-left: heavy #314154;
-        background: #111922;
-    }
-
-    #render-pane {
-        height: 1fr;
+    #renderer-pane {
+        height: 9;
         border: round #4b657f;
         padding: 1 2;
         background: #0d131a;
     }
 
     #editor-pane {
-        height: 14;
+        height: 1fr;
         border: round #5c7c9d;
+        background: #111922;
+    }
+
+    #sidebar {
+        width: 34;
+        min-width: 28;
+        border-left: heavy #314154;
         background: #111922;
     }
 
@@ -202,7 +384,7 @@ class CligebraApp(App[None]):
 
     BINDINGS = [
         ("ctrl+e", "focus_editor", "Editor"),
-        ("ctrl+r", "focus_render", "Render"),
+        ("ctrl+r", "focus_renderer", "Renderer"),
         ("ctrl+o", "focus_objects", "Objects"),
         ("ctrl+p", "focus_command", "Command"),
         ("ctrl+s", "sync_scene", "Parse"),
@@ -216,29 +398,32 @@ class CligebraApp(App[None]):
         yield Header(show_clock=True)
         with Horizontal(id="workspace"):
             with Vertical(id="center-column"):
-                yield RenderPane(id="render-pane")
-                yield TextArea.code_editor(SCENE_SAMPLE, language="python", id="editor-pane")
+                yield RendererPane(id="renderer-pane")
+                yield VimTextArea.code_editor(SCENE_SAMPLE, language="python", id="editor-pane")
             with Container(id="sidebar"):
-                yield ObjectsPane(id="objects-pane", classes="panel")
+                yield ObjectsPane(id="objects-pane")
         with Horizontal(id="command-row"):
             yield Label("Command", id="command-label")
             yield CommandPalette(placeholder=":command palette", id="command-palette")
-        yield StatusBar("Ctrl+E editor  Ctrl+R render  Ctrl+P command  ? help", id="status-bar")
+        yield StatusBar("Ctrl+E editor  Ctrl+R renderer  Ctrl+P command  ? help", id="status-bar")
         yield Footer()
 
     def on_mount(self) -> None:
         self.title = "CLIGEBRA"
+        self.renderer_bridge = RendererBridge()
+        self.renderer_bridge.start()
         self.editor.language = None
+        self.editor.enter_normal_mode()
         self.sync_scene()
         self.editor.focus()
 
     @property
-    def editor(self) -> TextArea:
-        return self.query_one("#editor-pane", TextArea)
+    def editor(self) -> VimTextArea:
+        return self.query_one("#editor-pane", VimTextArea)
 
     @property
-    def render_pane(self) -> RenderPane:
-        return self.query_one("#render-pane", RenderPane)
+    def renderer_pane(self) -> RendererPane:
+        return self.query_one("#renderer-pane", RendererPane)
 
     @property
     def objects_pane(self) -> ObjectsPane:
@@ -254,12 +439,37 @@ class CligebraApp(App[None]):
 
     def sync_scene(self) -> None:
         objects, issues = parse_scene(self.editor.text)
-        self.render_pane.update_scene(objects, issues)
         self.objects_pane.update_scene(objects, issues)
+        self.renderer_pane.set_renderer_status(
+            connected=True,
+            objects=len(objects),
+            issues=len(issues),
+        )
+        status = (
+            f"{len(objects)} objects parsed cleanly"
+            if not issues
+            else f"{len(objects)} objects, {len(issues)} issues"
+        )
+        self.renderer_bridge.send_scene(objects, issues, status)
         if issues:
-            self.status_bar.set_status(f"{len(objects)} objects, {len(issues)} issues")
+            self.status_bar.set_status(f"{self.editor.mode}  {len(objects)} objects, {len(issues)} issues")
         else:
-            self.status_bar.set_status(f"{len(objects)} objects parsed cleanly")
+            self.status_bar.set_status(f"{self.editor.mode}  {len(objects)} objects parsed cleanly")
+
+    def set_editor_mode(self, mode: str) -> None:
+        objects, issues = parse_scene(self.editor.text)
+        if issues:
+            self.status_bar.set_status(f"{mode}  {len(objects)} objects, {len(issues)} issues")
+        else:
+            self.status_bar.set_status(f"{mode}  {len(objects)} objects parsed cleanly")
+
+    def set_transient_status(self, message: str) -> None:
+        self.status_bar.set_status(message)
+
+    def focus_command_with_prefix(self, prefix: str) -> None:
+        self.command_palette.value = prefix
+        self.command_palette.focus()
+        self.status_bar.set_status(f"{self.editor.mode}  command palette")
 
     def action_sync_scene(self) -> None:
         self.sync_scene()
@@ -267,15 +477,15 @@ class CligebraApp(App[None]):
     def action_load_sample(self) -> None:
         self.editor.text = SCENE_SAMPLE
         self.sync_scene()
-        self.status_bar.set_status("Sample scene loaded")
+        self.status_bar.set_status(f"{self.editor.mode}  sample scene loaded")
 
     def action_focus_editor(self) -> None:
         self.editor.focus()
-        self.status_bar.set_status("Focus: editor")
+        self.status_bar.set_status(f"{self.editor.mode}  focus: editor")
 
-    def action_focus_render(self) -> None:
-        self.render_pane.focus()
-        self.status_bar.set_status("Focus: render")
+    def action_focus_renderer(self) -> None:
+        self.renderer_pane.focus()
+        self.status_bar.set_status("Focus: renderer info  scene window is external")
 
     def action_focus_objects(self) -> None:
         self.objects_pane.focus()
@@ -300,6 +510,7 @@ class CligebraApp(App[None]):
             return
 
         if value in {":q", "quit", "exit"}:
+            self.renderer_bridge.close()
             self.exit()
             return
 
@@ -320,6 +531,10 @@ class CligebraApp(App[None]):
 
         self.status_bar.set_status(f"Unknown command: {value}")
         self.command_palette.value = ""
+
+    def on_unmount(self) -> None:
+        if hasattr(self, "renderer_bridge"):
+            self.renderer_bridge.close()
 
 
 def run() -> None:

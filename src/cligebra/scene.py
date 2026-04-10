@@ -20,9 +20,9 @@ class ParseIssue:
 SCENE_SAMPLE = """# Scene buffer
 # Edit objects here. Parsed objects appear in the sidebar.
 point P1 = (0, 0, 0)
-vector V1 = (1, 2, 0)
+vector V1 = [1, 2, 0]
 line L1 = point(0,0,0) dir(1,1,0)
-plane A = point(0,0,0) normal(0,0,1)
+plane A = 2x + y + 2z - 8 = 0
 """
 
 
@@ -56,6 +56,12 @@ def parse_scene(source: str) -> tuple[list[SceneObject], list[ParseIssue]]:
         if not name.replace("_", "").isalnum():
             issues.append(ParseIssue(line_no, f"Invalid object name '{name}'"))
             continue
+
+        if kind == "vector":
+            stripped = expression.strip()
+            if not (stripped.startswith("[") and stripped.endswith("]")):
+                issues.append(ParseIssue(line_no, "Vectors must use square brackets: [x, y, z]"))
+                continue
 
         objects.append(
             SceneObject(
