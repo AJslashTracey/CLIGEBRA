@@ -1,0 +1,11 @@
+{
+  "name": "cligebra-snippets",
+  "contributes": {
+    "snippets": [
+      {
+        "language": "cligebra",
+        "path": "./cligebra.json"
+      }
+    ]
+  }
+}

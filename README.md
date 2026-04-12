@@ -160,3 +160,113 @@ filetype=cligebra
 ```
 
 If `Space c r` does nothing, restart Neovim after adding the config, reopen the `.clg` file, and check `:set filetype?`.
+
+### Add autocomplete
+
+CLIGEBRA autocomplete works nicely with LazyVim's default `blink.cmp` setup. The simplest version is:
+
+- keep the `cligebra` filetype from the section above
+- add a small `blink.cmp` filetype override
+- add CLIGEBRA snippets under `~/.config/nvim/snippets`
+
+Create this file:
+
+```text
+~/.config/nvim/lua/plugins/cligebra.lua
+```
+
+```lua
+return {
+  {
+    "saghen/blink.cmp",
+    opts = {
+      sources = {
+        per_filetype = {
+          cligebra = { "snippets", "buffer", "path" },
+        },
+      },
+    },
+  },
+}
+```
+
+Then create this folder:
+
+```text
+~/.config/nvim/snippets
+```
+
+with this package file:
+
+```json
+{
+  "name": "cligebra-snippets",
+  "contributes": {
+    "snippets": [
+      {
+        "language": "cligebra",
+        "path": "./cligebra.json"
+      }
+    ]
+  }
+}
+```
+
+and this snippet file:
+
+```json
+{
+  "point": {
+    "prefix": "point",
+    "body": "${1:p1} = (${2:0}, ${3:0}, ${4:0})",
+    "description": "Point definition"
+  },
+  "vector": {
+    "prefix": "vec",
+    "body": "${1:v1} = vec[${2:1}, ${3:0}, ${4:0}]",
+    "description": "Vector definition"
+  },
+  "line through two points": {
+    "prefix": "line",
+    "body": "${1:l1} = line(${2:p1}, ${3:p2})",
+    "description": "Line through two points"
+  },
+  "line through point and vector": {
+    "prefix": "linepv",
+    "body": "${1:l1} = line(${2:p1}, ${3:v1})",
+    "description": "Line through point and vector"
+  },
+  "plane point normal": {
+    "prefix": "plane",
+    "body": "${1:E1} = plane(${2:p1}, ${3:vec[0, 0, 1]})",
+    "description": "Plane through a point with a normal"
+  },
+  "plane through three points": {
+    "prefix": "plane3",
+    "body": "${1:E1} = plane(${2:p1}, ${3:p2}, ${4:p3})",
+    "description": "Plane through three points"
+  },
+  "plane with two vectors": {
+    "prefix": "planevv",
+    "body": "${1:E1} = plane(${2:p1}, ${3:v1}, ${4:v2})",
+    "description": "Plane through a point spanned by two vectors"
+  },
+  "cylinder": {
+    "prefix": "cyl",
+    "body": "${1:c1} = cyl(${2:p1}, ${3:p2}, ${4:1})",
+    "description": "Cylinder from two points and a radius"
+  }
+}
+```
+
+After restarting Neovim, editing a `.clg` file will give you:
+
+- snippet completion for CLIGEBRA constructors
+- buffer completion for names already used in the file, like `p1`, `p2`, `v1`
+- path completion if you want it
+
+The repository also includes the same example files here:
+
+- [editor/nvim/lua/plugins/cligebra.lua](/Users/aj/Desktop/GitHub/CLIGEBRA/editor/nvim/lua/plugins/cligebra.lua)
+- [editor/nvim/snippets/package.json](/Users/aj/Desktop/GitHub/CLIGEBRA/editor/nvim/snippets/package.json)
+- [editor/nvim/snippets/cligebra.json](/Users/aj/Desktop/GitHub/CLIGEBRA/editor/nvim/snippets/cligebra.json)

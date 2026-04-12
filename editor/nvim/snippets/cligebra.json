@@ -1,0 +1,42 @@
+{
+  "point": {
+    "prefix": "point",
+    "body": "${1:p1} = (${2:0}, ${3:0}, ${4:0})",
+    "description": "Point definition"
+  },
+  "vector": {
+    "prefix": "vec",
+    "body": "${1:v1} = vec[${2:1}, ${3:0}, ${4:0}]",
+    "description": "Vector definition"
+  },
+  "line through two points": {
+    "prefix": "line",
+    "body": "${1:l1} = line(${2:p1}, ${3:p2})",
+    "description": "Line through two points"
+  },
+  "line through point and vector": {
+    "prefix": "linepv",
+    "body": "${1:l1} = line(${2:p1}, ${3:v1})",
+    "description": "Line through point and vector"
+  },
+  "plane point normal": {
+    "prefix": "plane",
+    "body": "${1:E1} = plane(${2:p1}, ${3:vec[0, 0, 1]})",
+    "description": "Plane through a point with a normal"
+  },
+  "plane through three points": {
+    "prefix": "plane3",
+    "body": "${1:E1} = plane(${2:p1}, ${3:p2}, ${4:p3})",
+    "description": "Plane through three points"
+  },
+  "plane with two vectors": {
+    "prefix": "planevv",
+    "body": "${1:E1} = plane(${2:p1}, ${3:v1}, ${4:v2})",
+    "description": "Plane through a point spanned by two vectors"
+  },
+  "cylinder": {
+    "prefix": "cyl",
+    "body": "${1:c1} = cyl(${2:p1}, ${3:p2}, ${4:1})",
+    "description": "Cylinder from two points and a radius"
+  }
+}

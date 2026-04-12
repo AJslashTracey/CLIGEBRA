@@ -30,30 +30,23 @@ c1 = cyl(p1, (0, 0, 5), 1)
 
 ## Object Definitions
 
-You can define objects in two ways:
+Objects are defined like this:
 
 ```text
 name = expression
-kind name = expression
 ```
 
 Examples:
 
 ```text
 p1 = (0, 0, 0)
-point p1 = (0, 0, 0)
-
 v1 = vec[1, 2, 0]
-vector v1 = vec[1, 2, 0]
+l1 = line(p1, (4, 6, 0))
+E1 = plane(p1, vec[0, 0, 1])
+c1 = cyl((0,0,0), (0,0,5), 1)
 ```
 
-Unnamed objects are also allowed:
-
-```text
-(0, 0, 0)
-vec[1, 2, 0]
-cyl((0,0,0), (0,0,5), 1)
-```
+The object type is inferred from the expression, so there is no need to write extra words like `point` or `vector` before the name.
 
 ## Points
 
