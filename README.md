@@ -17,10 +17,11 @@ Current scene syntax examples:
 - `l1 = line(point(0,0,0), dir(1,1,0))`
 - `c1 = cyl((0,0,0), (0,0,5), 1)`
 - `cyl((0,0,0), (0,0,5), 1)`
+- `s1 = sphere((0,0,0), 2)`
 - `a = 2x + y + 2z - 8 = 0`
 - `vec[0, 0, 2]`
 
-Points use `(x, y, z)`, vectors use `vec[x, y, z]`, and cylinders use `cyl((x,y,z), (x,y,z), radius)`.
+Points use `(x, y, z)`, vectors use `vec[x, y, z]`, cylinders use `cyl((x,y,z), (x,y,z), radius)`, and spheres use `sphere((x,y,z), radius)`.
 
 ## Run
 
@@ -255,6 +256,11 @@ and this snippet file:
     "prefix": "cyl",
     "body": "${1:c1} = cyl(${2:p1}, ${3:p2}, ${4:1})",
     "description": "Cylinder from two points and a radius"
+  },
+  "sphere": {
+    "prefix": "sphere",
+    "body": "${1:s1} = sphere(${2:p1}, ${3:2})",
+    "description": "Sphere from a center point and radius"
   }
 }
 ```

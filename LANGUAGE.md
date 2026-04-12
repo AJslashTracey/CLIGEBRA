@@ -26,6 +26,9 @@ E = plane(p1, vec[0, 0, 1])
 
 # cylinder
 c1 = cyl(p1, (0, 0, 5), 1)
+
+# sphere
+s1 = sphere(p1, 2)
 ```
 
 ## Object Definitions
@@ -201,6 +204,37 @@ c1 = zyl((0,0,0), (0,0,5), 1)
 - endpoints can be literal points or named points
 - named points must be defined earlier in the file
 
+## Spheres
+
+### Preferred forms
+
+Spheres use:
+
+```text
+s1 = sphere(center_point, radius)
+```
+
+Examples:
+
+```text
+s1 = sphere((0,0,0), 2)
+s1 = sphere(p1, 3)
+```
+
+### Short alias
+
+The short alias also works:
+
+```text
+s1 = sph((0,0,0), 2)
+```
+
+### Rules
+
+- radius must be greater than `0`
+- the center can be a literal point or a named point
+- named points must be defined earlier in the file
+
 ## References
 
 Named objects can be reused in later expressions.
@@ -208,6 +242,7 @@ Named objects can be reused in later expressions.
 Currently:
 
 - points can be reused in `line(...)`, `plane(...)`, and `cyl(...)`
+- points can be reused in `sphere(...)`
 - vectors can be reused in `line(...)` and `plane(...)`
 
 Example:
@@ -224,6 +259,7 @@ E1 = plane(p1, v1)
 E2 = plane(p1, p2, (1,2,7))
 E3 = plane(p1, v1, v2)
 c1 = cyl(p1, p2, 0.5)
+s1 = sphere(p1, 2)
 ```
 
 ## Comments
@@ -252,4 +288,5 @@ l1 = line(p1, p2)
 E1 = plane(p1, p2, p3)
 E2 = plane(p1, v1, v2)
 c1 = cyl(p1, p2, 3)
+s1 = sphere(p1, 4)
 ```

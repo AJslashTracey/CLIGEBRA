@@ -24,12 +24,13 @@ p1 = (0, 0, 0)
 v1 = vec[1, 2, 0]
 l1 = line(point(0,0,0), dir(1,1,0))
 c1 = cyl((0,0,0), (0,0,5), 1)
+s1 = sphere(p1, 2)
 a = 2x + y + 2z - 8 = 0
 vec[0, 0, 2]
 """
 
 
-VALID_KINDS = {"point", "vector", "line", "plane", "cylinder"}
+VALID_KINDS = {"point", "vector", "line", "plane", "cylinder", "sphere"}
 KIND_ALIASES = {
     "point": "point",
     "pt": "point",
@@ -42,6 +43,8 @@ KIND_ALIASES = {
     "cylinder": "cylinder",
     "cyl": "cylinder",
     "zyl": "cylinder",
+    "sphere": "sphere",
+    "sph": "sphere",
 }
 
 
@@ -127,6 +130,10 @@ def infer_kind(expression: str) -> str | None:
         return "cylinder"
     if stripped.startswith("cylinder(") and stripped.endswith(")"):
         return "cylinder"
+    if stripped.startswith("sphere(") and stripped.endswith(")"):
+        return "sphere"
+    if stripped.startswith("sph(") and stripped.endswith(")"):
+        return "sphere"
     if stripped.lower().startswith("point") and "dir" in stripped.lower():
         return "line"
     if "normal" in stripped.lower() and "point" in stripped.lower():

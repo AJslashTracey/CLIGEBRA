@@ -238,6 +238,12 @@ class PyVistaSceneWindow:
                     float(obj["radius"]),
                     obj["name"],
                 )
+            elif kind == "sphere":
+                self.draw_sphere(
+                    np.array(obj["center"], dtype=float),
+                    float(obj["radius"]),
+                    obj["name"],
+                )
         self.draw_overlay()
         self.plotter.camera_position = camera_position
         self.plotter.render()
@@ -352,6 +358,21 @@ class PyVistaSceneWindow:
             point_size=0,
         )
 
+    def draw_sphere(self, center: np.ndarray, radius: float, name: str) -> None:
+        if radius <= 0.0:
+            return
+
+        sphere = self.pv.Sphere(radius=radius, center=center, theta_resolution=32, phi_resolution=32)
+        self.plotter.add_mesh(sphere, color="#74c0fc", opacity=0.28, show_edges=True, edge_color="#a5d8ff")
+        self.plotter.add_point_labels(
+            [center],
+            [name],
+            font_size=14,
+            text_color="#d0ebff",
+            shape=None,
+            point_size=0,
+        )
+
     def draw_overlay(self) -> None:
         lines = [
            "" 
@@ -385,6 +406,20 @@ class PyVistaSceneWindow:
                 points.extend([start, end])
                 for offset in offsets:
                     points.extend([start + offset, end + offset])
+            elif kind == "sphere":
+                center = np.array(obj["center"], dtype=float)
+                radius = float(obj["radius"])
+                offsets = [
+                    np.array([radius, 0.0, 0.0], dtype=float),
+                    np.array([-radius, 0.0, 0.0], dtype=float),
+                    np.array([0.0, radius, 0.0], dtype=float),
+                    np.array([0.0, -radius, 0.0], dtype=float),
+                    np.array([0.0, 0.0, radius], dtype=float),
+                    np.array([0.0, 0.0, -radius], dtype=float),
+                ]
+                points.append(center)
+                for offset in offsets:
+                    points.append(center + offset)
 
         return points or [np.zeros(3, dtype=float)]
 
@@ -529,6 +564,31 @@ def compile_payload(scene_payload: dict) -> dict:
             )
             continue
 
+        if kind == "sphere":
+            try:
+                center_expr, radius = parse_sphere_expression(expression)
+            except ValueError as error:
+                issues.append(f"{name}: {error}")
+                continue
+
+            center = resolve_point(center_expr, named_points)
+            if center is None:
+                issues.append(f"{name}: sphere center must be a point or point name")
+                continue
+            if radius <= 0.0:
+                issues.append(f"{name}: sphere radius must be greater than 0")
+                continue
+
+            compiled_objects.append(
+                {
+                    "kind": "sphere",
+                    "name": name,
+                    "center": center.tolist(),
+                    "radius": radius,
+                }
+            )
+            continue
+
         issues.append(f"{name}: unsupported {kind}")
 
     return {"objects": compiled_objects, "issues": issues, "status": scene_payload.get("status", "")}
@@ -648,6 +708,28 @@ def parse_cylinder_expression(expression: str) -> tuple[str, str, float]:
         raise ValueError("cylinder radius must be numeric") from error
 
     return start_expr, end_expr, radius
+
+
+def parse_sphere_expression(expression: str) -> tuple[str, float]:
+    stripped = expression.strip()
+    call_match = re.fullmatch(r"(?:sph|sphere)\s*\((.*)\)", stripped, re.IGNORECASE)
+    if call_match is None:
+        raise ValueError("expected sphere((x,y,z), radius)")
+
+    try:
+        center_expr, radius_expr = split_call_arguments(call_match.group(1))
+    except ValueError as error:
+        raise ValueError("expected sphere((x,y,z), radius)") from error
+
+    if any(not part for part in (center_expr, radius_expr)):
+        raise ValueError("expected sphere((x,y,z), radius)")
+
+    try:
+        radius = float(radius_expr.strip())
+    except ValueError as error:
+        raise ValueError("sphere radius must be numeric") from error
+
+    return center_expr, radius
 
 
 def renderer_main(state_file: Path) -> None:
