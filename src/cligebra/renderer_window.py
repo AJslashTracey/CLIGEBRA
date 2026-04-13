@@ -216,7 +216,11 @@ class PyVistaSceneWindow:
         for obj in self.payload.get("objects", []):
             kind = obj["kind"]
             if kind == "point":
-                self.draw_point(np.array(obj["point"], dtype=float), obj["name"])
+                self.draw_point(
+                    np.array(obj["point"], dtype=float),
+                    obj["name"],
+                    anonymous=bool(obj.get("anonymous", False)),
+                )
             elif kind == "vector":
                 self.draw_vector(np.array(obj["vector"], dtype=float), obj["name"])
             elif kind == "line":
@@ -248,12 +252,18 @@ class PyVistaSceneWindow:
         self.plotter.camera_position = camera_position
         self.plotter.render()
 
-    def draw_point(self, point: np.ndarray, name: str) -> None:
+    def draw_point(self, point: np.ndarray, name: str, *, anonymous: bool = False) -> None:
         self.plotter.add_points(point.reshape(1, 3), color="#ffd43b", point_size=14, render_points_as_spheres=True)
+        if anonymous:
+            return
+
+        label_point = self.point_label_position(point)
+        leader = self.pv.Line(point, label_point)
+        self.plotter.add_mesh(leader, color="#ffe066", line_width=2)
         self.plotter.add_point_labels(
-            [point],
+            [label_point],
             [name],
-            font_size=14,
+            font_size=16,
             text_color="#fff3bf",
             shape=None,
             point_size=0,
@@ -382,6 +392,12 @@ class PyVistaSceneWindow:
             lines.append(" | ".join(issues[:2]))
         self.plotter.add_text("\n".join(lines), position="lower_left", font_size=10, color="#e9ecef")
 
+    def point_label_position(self, point: np.ndarray) -> np.ndarray:
+        offset = np.array([1.0, 0.7, 0.9], dtype=float)
+        offset /= np.linalg.norm(offset)
+        distance = max(2.0, self._finite_scene_radius * 0.09)
+        return point + offset * distance
+
     def finite_scene_points(self) -> list[np.ndarray]:
         points: list[np.ndarray] = []
 
@@ -466,7 +482,14 @@ def compile_payload(scene_payload: dict) -> dict:
                 issues.append(f"{name}: invalid point syntax")
                 continue
             named_points[name] = point
-            compiled_objects.append({"kind": "point", "name": name, "point": point.tolist()})
+            compiled_objects.append(
+                {
+                    "kind": "point",
+                    "name": name,
+                    "point": point.tolist(),
+                    "anonymous": bool(obj.get("anonymous", False)),
+                }
+            )
             continue
 
         if kind == "vector":
