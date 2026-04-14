@@ -10,7 +10,11 @@ The current milestone focuses on the interface:
 - a separate PyVista scene window for 3D visualization
 
 The language reference lives in [LANGUAGE.md](https://github.com/AJslashTracey/CLIGEBRA/blob/main/LANGUAGE.md).
-Check out [example.md](https://github.com/AJslashTracey/CLIGEBRA/blob/main/example.md) to see how I use it in my Math Classes
+
+
+Check out [example.md](https://github.com/AJslashTracey/CLIGEBRA/blob/main/example.md) to see how I use it in my Math Classes.
+
+
 ## Two Ways To Use It
 
 There are two normal ways to work with CLIGEBRA:
