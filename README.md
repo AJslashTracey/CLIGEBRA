@@ -11,6 +11,18 @@ The current milestone focuses on the interface:
 
 The language reference lives in [LANGUAGE.md](/Users/aj/Desktop/GitHub/CLIGEBRA/LANGUAGE.md).
 
+## Two Ways To Use It
+
+There are two normal ways to work with CLIGEBRA:
+
+1. Built-in editor  
+   Start `cligebra` or `cligebra tui` and edit the scene directly inside the app. The object list and renderer update from that editor.
+
+2. Neovim or another external editor  
+   Edit a `.clg` file as a normal file and run `cligebra watch <file>` to update the renderer when the file is saved.
+
+If you want everything in one place, use the built-in editor. If you want your usual editor workflow, use a `.clg` file with `watch`.
+
 ## Run
 
 Fastest local run:
@@ -47,6 +59,22 @@ cligebra
 ```
 
 `cligebra` and `cligebra tui` start the TUI. `cligebra watch <file>` starts the PyVista renderer for a scene file.
+
+## Built-in Editor
+
+Start the built-in editor with:
+
+```bash
+cligebra
+```
+
+or:
+
+```bash
+cligebra tui
+```
+
+Edit the scene directly inside the app. The parsed object list updates in the sidebar and the renderer updates from the editor content.
 
 ## Neovim
 
