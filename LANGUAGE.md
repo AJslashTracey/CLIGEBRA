@@ -1,292 +1,130 @@
 # CLIGEBRA Language
 
-This file describes the CLIGEBRA scene language only.
+This file shows the normal CLIGEBRA forms only.
 
-## Overview
+## Basics
 
-A CLIGEBRA file is a list of object definitions, one per line.
+A `.clg` file is a list of object definitions, one per line:
+
+```text
+name = expression
+```
 
 Blank lines and lines starting with `#` are ignored.
 
 Example:
 
 ```text
-# points
 p1 = (0, 0, 0)
 p2 = (4, 6, 0)
-
-# vectors
-v1 = vec[1, 2, 0]
-
-# line
+v1 = vec[0, 0, 1]
 l1 = line(p1, p2)
-
-# plane
-E = plane(p1, vec[0, 0, 1])
-
-# cylinder
-c1 = cyl(p1, (0, 0, 5), 1)
-
-# sphere
+E = plane(p1, v1)
+c1 = cyl(p1, p2, 1)
 s1 = sphere(p1, 2)
 ```
 
-## Object Definitions
-
-Objects are defined like this:
-
-```text
-name = expression
-```
-
-Examples:
-
-```text
-p1 = (0, 0, 0)
-v1 = vec[1, 2, 0]
-l1 = line(p1, (4, 6, 0))
-E1 = plane(p1, vec[0, 0, 1])
-c1 = cyl((0,0,0), (0,0,5), 1)
-```
-
-The object type is inferred from the expression, so there is no need to write extra words like `point` or `vector` before the name.
-
 ## Points
-
-Points use parentheses:
 
 ```text
 p1 = (x, y, z)
 ```
 
-Examples:
+Example:
 
 ```text
 p1 = (0, 0, 0)
-p2 = (4, -3, 7)
 ```
 
 ## Vectors
-
-Vectors use `vec[...]`:
 
 ```text
 v1 = vec[x, y, z]
 ```
 
-Examples:
+Example:
 
 ```text
 v1 = vec[1, 2, 0]
-v2 = vec[0, 0, 1]
 ```
 
 ## Lines
 
-### Preferred forms
-
-Line through a point and a vector:
-
-```text
-l1 = line(p1, v1)
-l1 = line((0,0,0), vec[1,2,0])
-l1 = line((0,0,0), [1,2,0])
-l1 = line((0,0,0), (1,2,0))
-```
-
-Line through two points:
+Through two points:
 
 ```text
 l1 = line(p1, p2)
-l1 = line((0,0,0), (4,6,0))
 ```
 
-### Legacy form
-
-This older form is still accepted:
+Through a point and a vector:
 
 ```text
-l1 = line(point(0,0,0), dir(1,1,0))
+l1 = line(p1, v1)
 ```
 
-### Notes
+Examples:
 
-- In `line(p1, p2)`, the two points must be different.
-- In `line(p1, v1)`, the vector must be non-zero.
-- Named points and named vectors must be defined earlier in the file.
+```text
+l1 = line((0, 0, 0), (4, 6, 0))
+l2 = line((0, 0, 0), vec[1, 2, 0])
+```
 
 ## Planes
 
-### Equation form
-
-Planes can be written as equations:
+Equation form:
 
 ```text
-E = 2x + y + 2z - 8 = 0
-floor = z = 0
-wall = x - 3 = 0
+E = 2x + y - 2z = 0
 ```
 
-### Point + normal form
+Point and normal vector:
 
 ```text
-E = plane(p1, vec[0,0,1])
-E = plane((0,0,0), vec[0,0,1])
+E = plane(p1, v1)
 ```
 
-This means: plane through the point with the given normal vector.
-
-### Three-point form
+Example:
 
 ```text
-E = plane(p1, p2, p3)
-E = plane((0,0,0), (1,0,0), (0,1,0))
-```
-
-This means: plane through three points.
-
-Rules:
-
-- the three points must not be collinear
-- named points must be defined earlier in the file
-
-### Point + two-vector form
-
-```text
-E = plane(p1, v1, v2)
-E = plane((0,0,0), vec[1,0,0], vec[0,1,0])
-```
-
-This means: plane through the point, spanned by the two vectors.
-
-Rules:
-
-- the two vectors must not be parallel
-- named vectors must be defined earlier in the file
-
-### Legacy point/normal form
-
-This older form is still accepted:
-
-```text
-E = point(0,0,0) normal vec[0,0,1]
+E = plane((0, 0, 0), vec[0, 0, 1])
 ```
 
 ## Cylinders
-
-### Preferred forms
-
-Cylinders use:
 
 ```text
 c1 = cyl(start_point, end_point, radius)
 ```
 
-Examples:
+Example:
 
 ```text
-c1 = cyl((0,0,0), (0,0,5), 1)
-c1 = cyl(p1, p2, 3)
+c1 = cyl((0, 0, 0), (0, 0, 5), 1)
 ```
-
-### Compatibility alias
-
-The older spelling still works:
-
-```text
-c1 = zyl((0,0,0), (0,0,5), 1)
-```
-
-### Rules
-
-- radius must be greater than `0`
-- start and end must be different points
-- endpoints can be literal points or named points
-- named points must be defined earlier in the file
 
 ## Spheres
-
-### Preferred forms
-
-Spheres use:
 
 ```text
 s1 = sphere(center_point, radius)
 ```
 
-Examples:
+Example:
 
 ```text
-s1 = sphere((0,0,0), 2)
-s1 = sphere(p1, 3)
+s1 = sphere((0, 0, 0), 2)
 ```
-
-### Short alias
-
-The short alias also works:
-
-```text
-s1 = sph((0,0,0), 2)
-```
-
-### Rules
-
-- radius must be greater than `0`
-- the center can be a literal point or a named point
-- named points must be defined earlier in the file
 
 ## References
 
-Named objects can be reused in later expressions.
-
-Currently:
-
-- points can be reused in `line(...)`, `plane(...)`, and `cyl(...)`
-- points can be reused in `sphere(...)`
-- vectors can be reused in `line(...)` and `plane(...)`
+You can reuse names that were defined earlier in the file.
 
 Example:
 
 ```text
-p1 = (1, 2, 3)
-p2 = (4, 6, 3)
-v1 = vec[0, 1, 0]
-v2 = vec[0, 0, 1]
-
-l1 = line(p1, v1)
-l2 = line(p1, p2)
-E1 = plane(p1, v1)
-E2 = plane(p1, p2, (1,2,7))
-E3 = plane(p1, v1, v2)
+p1 = (0, 0, 0)
+p2 = (4, 0, 0)
+v1 = vec[0, 0, 1]
+l1 = line(p1, p2)
+E = plane(p1, v1)
 c1 = cyl(p1, p2, 0.5)
 s1 = sphere(p1, 2)
-```
-
-## Comments
-
-Comments start with `#`:
-
-```text
-# this is a comment
-p1 = (0, 0, 0)
-```
-
-## Minimal Example
-
-```text
-# points
-p1 = (4,5,23)
-p2 = (14,-13,23)
-p3 = (4,5,28)
-
-# vectors
-v1 = vec[0,0,1]
-v2 = vec[1,0,0]
-
-# geometry
-l1 = line(p1, p2)
-E1 = plane(p1, p2, p3)
-E2 = plane(p1, v1, v2)
-c1 = cyl(p1, p2, 3)
-s1 = sphere(p1, 4)
 ```

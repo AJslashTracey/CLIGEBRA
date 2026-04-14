@@ -165,7 +165,7 @@ def configure_renderer_environment() -> None:
 
 
 class PyVistaSceneWindow:
-    def __init__(self, state_file: Path) -> None:
+    def __init__(self, state_file: Path, *, off_screen: bool = False, title: str = "CLIGEBRA Scene") -> None:
         configure_renderer_environment()
 
         import pyvista as pv
@@ -177,7 +177,7 @@ class PyVistaSceneWindow:
         self._finite_scene_points: list[np.ndarray] = []
         self._finite_scene_center = np.zeros(3, dtype=float)
         self._finite_scene_radius = 4.0
-        self.plotter = pv.Plotter(window_size=(1100, 820), title="CLIGEBRA Scene")
+        self.plotter = pv.Plotter(window_size=(1100, 820), off_screen=off_screen, title=title)
         self.plotter.set_background("#0c1117")
         self.plotter.enable_anti_aliasing()
         self.plotter.add_axes(line_width=4, labels_off=False)
@@ -222,18 +222,24 @@ class PyVistaSceneWindow:
                     anonymous=bool(obj.get("anonymous", False)),
                 )
             elif kind == "vector":
-                self.draw_vector(np.array(obj["vector"], dtype=float), obj["name"])
+                self.draw_vector(
+                    np.array(obj["vector"], dtype=float),
+                    obj["name"],
+                    anonymous=bool(obj.get("anonymous", False)),
+                )
             elif kind == "line":
                 self.draw_line(
                     np.array(obj["anchor"], dtype=float),
                     np.array(obj["direction"], dtype=float),
                     obj["name"],
+                    anonymous=bool(obj.get("anonymous", False)),
                 )
             elif kind == "plane":
                 self.draw_plane(
                     np.array(obj["point"], dtype=float),
                     np.array(obj["normal"], dtype=float),
                     obj["name"],
+                    anonymous=bool(obj.get("anonymous", False)),
                 )
             elif kind == "cylinder":
                 self.draw_cylinder(
@@ -241,12 +247,14 @@ class PyVistaSceneWindow:
                     np.array(obj["end"], dtype=float),
                     float(obj["radius"]),
                     obj["name"],
+                    anonymous=bool(obj.get("anonymous", False)),
                 )
             elif kind == "sphere":
                 self.draw_sphere(
                     np.array(obj["center"], dtype=float),
                     float(obj["radius"]),
                     obj["name"],
+                    anonymous=bool(obj.get("anonymous", False)),
                 )
         self.draw_overlay()
         self.plotter.camera_position = camera_position
@@ -260,24 +268,19 @@ class PyVistaSceneWindow:
         label_point = self.point_label_position(point)
         leader = self.pv.Line(point, label_point)
         self.plotter.add_mesh(leader, color="#ffe066", line_width=2)
-        self.plotter.add_point_labels(
-            [label_point],
-            [name],
-            font_size=16,
-            text_color="#fff3bf",
-            shape=None,
-            point_size=0,
-        )
+        self.add_name_label([label_point], [name], font_size=16, text_color="#fff3bf", point_color="#ffd43b")
 
-    def draw_vector(self, vector: np.ndarray, name: str) -> None:
+    def draw_vector(self, vector: np.ndarray, name: str, *, anonymous: bool = False) -> None:
         if np.allclose(vector, 0.0):
             return
         length = np.linalg.norm(vector)
         unit = vector / length
-        tip_length = min(0.35, length * 0.35)
+        # Keep the arrowhead compact so the visual length still reads as the
+        # actual vector length instead of looking overstretched.
+        tip_length = min(0.22, length * 0.22)
         shaft_length = max(0.0, length - tip_length)
-        shaft_radius = min(0.035, length * 0.04)
-        tip_radius = min(0.12, length * 0.12)
+        shaft_radius = min(0.028, length * 0.03)
+        tip_radius = min(0.08, length * 0.08)
 
         if shaft_length > 0.0:
             shaft = self.pv.Cylinder(
@@ -297,16 +300,11 @@ class PyVistaSceneWindow:
             resolution=24,
         )
         self.plotter.add_mesh(tip, color="#ff922b", smooth_shading=True)
-        self.plotter.add_point_labels(
-            [vector],
-            [name],
-            font_size=14,
-            text_color="#ffe8cc",
-            shape=None,
-            point_size=0,
-        )
+        if anonymous:
+            return
+        self.add_name_label([vector], [name], font_size=14, text_color="#ffe8cc", point_color="#ff922b")
 
-    def draw_line(self, anchor: np.ndarray, direction: np.ndarray, name: str) -> None:
+    def draw_line(self, anchor: np.ndarray, direction: np.ndarray, name: str, *, anonymous: bool = False) -> None:
         unit = direction / np.linalg.norm(direction)
         line_center = self.line_render_center(anchor, unit)
         line_half_extent = self.line_render_half_extent()
@@ -314,16 +312,17 @@ class PyVistaSceneWindow:
         end = line_center + unit * line_half_extent
         line = self.pv.Line(start, end)
         self.plotter.add_mesh(line, color="#dee2e6", line_width=4)
-        self.plotter.add_point_labels(
+        if anonymous:
+            return
+        self.add_name_label(
             [line_center + unit * min(1.5, line_half_extent * 0.2)],
             [name],
             font_size=14,
             text_color="#f8f9fa",
-            shape=None,
-            point_size=0,
+            point_color="#dee2e6",
         )
 
-    def draw_plane(self, point: np.ndarray, normal: np.ndarray, name: str) -> None:
+    def draw_plane(self, point: np.ndarray, normal: np.ndarray, name: str, *, anonymous: bool = False) -> None:
         plane_center = self.plane_render_center(point, normal)
         plane_size = self.plane_render_size()
         plane = self.pv.Plane(
@@ -335,16 +334,13 @@ class PyVistaSceneWindow:
             j_resolution=8,
         )
         self.plotter.add_mesh(plane, color="#868e96", opacity=0.22, show_edges=True, edge_color="#adb5bd")
-        self.plotter.add_point_labels(
-            [plane_center],
-            [name],
-            font_size=14,
-            text_color="#ced4da",
-            shape=None,
-            point_size=0,
-        )
+        if anonymous:
+            return
+        self.add_name_label([plane_center], [name], font_size=14, text_color="#ced4da", point_color="#adb5bd")
 
-    def draw_cylinder(self, start: np.ndarray, end: np.ndarray, radius: float, name: str) -> None:
+    def draw_cylinder(
+        self, start: np.ndarray, end: np.ndarray, radius: float, name: str, *, anonymous: bool = False
+    ) -> None:
         axis = end - start
         axis_norm = np.linalg.norm(axis)
         if axis_norm == 0.0:
@@ -359,29 +355,25 @@ class PyVistaSceneWindow:
             capping=False,
         )
         self.plotter.add_mesh(cylinder, color="#22d3c5", opacity=0.35, show_edges=True, edge_color="#99f6e4")
-        self.plotter.add_point_labels(
+        if anonymous:
+            return
+        self.add_name_label(
             [(start + end) / 2],
             [name],
             font_size=14,
             text_color="#99f6e4",
-            shape=None,
-            point_size=0,
+            point_color="#22d3c5",
         )
 
-    def draw_sphere(self, center: np.ndarray, radius: float, name: str) -> None:
+    def draw_sphere(self, center: np.ndarray, radius: float, name: str, *, anonymous: bool = False) -> None:
         if radius <= 0.0:
             return
 
         sphere = self.pv.Sphere(radius=radius, center=center, theta_resolution=32, phi_resolution=32)
         self.plotter.add_mesh(sphere, color="#74c0fc", opacity=0.28, show_edges=True, edge_color="#a5d8ff")
-        self.plotter.add_point_labels(
-            [center],
-            [name],
-            font_size=14,
-            text_color="#d0ebff",
-            shape=None,
-            point_size=0,
-        )
+        if anonymous:
+            return
+        self.add_name_label([center], [name], font_size=14, text_color="#d0ebff", point_color="#74c0fc")
 
     def draw_overlay(self) -> None:
         lines = [
@@ -397,6 +389,34 @@ class PyVistaSceneWindow:
         offset /= np.linalg.norm(offset)
         distance = max(2.0, self._finite_scene_radius * 0.09)
         return point + offset * distance
+
+    def add_name_label(
+        self,
+        points: list[np.ndarray],
+        labels: list[str],
+        *,
+        font_size: int,
+        text_color: str,
+        point_color: str,
+    ) -> None:
+        self.plotter.add_point_labels(
+            points,
+            labels,
+            bold=True,
+            font_size=font_size,
+            text_color=text_color,
+            show_points=True,
+            point_color=point_color,
+            point_size=10,
+            shape="rounded_rect",
+            shape_color="#111827",
+            fill_shape=True,
+            margin=4,
+            shape_opacity=0.82,
+            always_visible=True,
+            background_color="#111827",
+            background_opacity=0.82,
+        )
 
     def finite_scene_points(self) -> list[np.ndarray]:
         points: list[np.ndarray] = []
@@ -498,7 +518,14 @@ def compile_payload(scene_payload: dict) -> dict:
                 issues.append(f"{name}: invalid vector syntax")
                 continue
             named_vectors[name] = vector
-            compiled_objects.append({"kind": "vector", "name": name, "vector": vector.tolist()})
+            compiled_objects.append(
+                {
+                    "kind": "vector",
+                    "name": name,
+                    "vector": vector.tolist(),
+                    "anonymous": bool(obj.get("anonymous", False)),
+                }
+            )
             continue
 
         if kind == "line":
@@ -513,6 +540,7 @@ def compile_payload(scene_payload: dict) -> dict:
                     "name": name,
                     "anchor": anchor.tolist(),
                     "direction": direction.tolist(),
+                    "anonymous": bool(obj.get("anonymous", False)),
                 }
             )
             continue
@@ -552,6 +580,7 @@ def compile_payload(scene_payload: dict) -> dict:
                     "name": name,
                     "point": point.tolist(),
                     "normal": normal.tolist(),
+                    "anonymous": bool(obj.get("anonymous", False)),
                 }
             )
             continue
@@ -583,6 +612,7 @@ def compile_payload(scene_payload: dict) -> dict:
                     "start": start.tolist(),
                     "end": end.tolist(),
                     "radius": radius,
+                    "anonymous": bool(obj.get("anonymous", False)),
                 }
             )
             continue
@@ -608,6 +638,7 @@ def compile_payload(scene_payload: dict) -> dict:
                     "name": name,
                     "center": center.tolist(),
                     "radius": radius,
+                    "anonymous": bool(obj.get("anonymous", False)),
                 }
             )
             continue
