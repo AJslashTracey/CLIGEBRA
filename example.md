@@ -1,5 +1,7 @@
 # Example Usage
 
+This particual case was used by me to solve a difficult vector class question
+
 This scene:
 
 ```text
