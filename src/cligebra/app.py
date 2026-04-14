@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical
+from textual.events import Key
 from textual.screen import ModalScreen
 from textual.widgets import Footer, Header, Input, Label, Static, TextArea
 
@@ -22,11 +25,12 @@ class HelpScreen(ModalScreen[None]):
                         "Ctrl+R: focus renderer info pane",
                         "Ctrl+O: focus objects pane",
                         "Ctrl+P: focus command palette",
-                        "Ctrl+S: sync scene",
+                        "Ctrl+S: save file",
                         "Ctrl+G: load sample scene",
                         "?: toggle help",
                         "",
                         "Edit the scene buffer in the terminal.",
+                        "Commands: save | save <file> | open <file> | sample | help | quit",
                         "The 3D scene opens in a separate PyVista window.",
                         "Use that window for mouse orbit, pan, and zoom.",
                     ]
@@ -87,6 +91,35 @@ class StatusBar(Static):
 
 class CommandPalette(Input):
     pass
+
+
+class CligebraTextArea(TextArea):
+    def on_key(self, event: Key) -> None:
+        pairs = {
+            "(": ")",
+            "[": "]",
+        }
+        closers = {")", "]"}
+        character = event.character
+
+        if character in pairs:
+            row, column = self.cursor_location
+            self.insert(character + pairs[character], (row, column))
+            self.move_cursor((row, column + 1))
+            event.stop()
+            event.prevent_default()
+            return
+
+        if character in closers:
+            row, column = self.cursor_location
+            lines = self.text.split("\n")
+            if row < len(lines) and column < len(lines[row]) and lines[row][column] == character:
+                self.move_cursor((row, column + 1))
+                event.stop()
+                event.prevent_default()
+                return
+
+        super().on_key(event)
 
 
 class CligebraApp(App[None]):
@@ -168,19 +201,23 @@ class CligebraApp(App[None]):
         ("ctrl+r", "focus_renderer", "Renderer"),
         ("ctrl+o", "focus_objects", "Objects"),
         ("ctrl+p", "focus_command", "Command"),
-        ("ctrl+s", "sync_scene", "Parse"),
+        ("ctrl+s", "save_file", "Save"),
         ("ctrl+g", "load_sample", "Sample"),
         ("question_mark", "toggle_help", "Help"),
     ]
 
     SUB_TITLE = "Geometry Workspace"
 
+    def __init__(self, scene_path: Path | None = None) -> None:
+        super().__init__()
+        self.scene_path = scene_path
+
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         with Horizontal(id="workspace"):
             with Vertical(id="center-column"):
                 yield RendererPane(id="renderer-pane")
-                yield TextArea.code_editor(SCENE_SAMPLE, language="python", id="editor-pane")
+                yield CligebraTextArea.code_editor(SCENE_SAMPLE, language="python", id="editor-pane")
             with Container(id="sidebar"):
                 yield ObjectsPane(id="objects-pane")
         with Horizontal(id="command-row"):
@@ -194,12 +231,14 @@ class CligebraApp(App[None]):
         self.renderer_bridge = RendererBridge()
         self.renderer_bridge.start()
         self.editor.language = None
+        if self.scene_path is not None:
+            self.load_editor_file(self.scene_path)
         self.sync_scene()
         self.editor.focus()
 
     @property
     def editor(self) -> TextArea:
-        return self.query_one("#editor-pane", TextArea)
+        return self.query_one("#editor-pane", CligebraTextArea)
 
     @property
     def renderer_pane(self) -> RendererPane:
@@ -236,6 +275,40 @@ class CligebraApp(App[None]):
         else:
             self.status_bar.set_status(f"Editor  {len(objects)} objects parsed cleanly")
 
+    def load_editor_file(self, path: Path) -> None:
+        try:
+            if path.exists():
+                if not path.is_file():
+                    self.status_bar.set_status(f"{path}: not a file")
+                    return
+                self.editor.text = path.read_text(encoding="utf-8")
+                self.status_bar.set_status(f"Opened {path}")
+            else:
+                self.editor.text = ""
+                self.status_bar.set_status(f"New file {path}")
+            self.scene_path = path
+            self.sub_title = str(path)
+        except OSError as error:
+            self.status_bar.set_status(f"{path}: {error}")
+
+    def save_editor_file(self, path: Path | None = None) -> None:
+        target = path or self.scene_path
+        if target is None:
+            self.status_bar.set_status("No file selected. Use 'save <file>'.")
+            return
+
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(self.editor.text, encoding="utf-8")
+        except OSError as error:
+            self.status_bar.set_status(f"{target}: {error}")
+            return
+
+        self.scene_path = target
+        self.sub_title = str(target)
+        self.sync_scene()
+        self.status_bar.set_status(f"Saved {target}")
+
     def set_transient_status(self, message: str) -> None:
         self.status_bar.set_status(message)
 
@@ -244,10 +317,12 @@ class CligebraApp(App[None]):
         self.command_palette.focus()
         self.status_bar.set_status("Command palette")
 
-    def action_sync_scene(self) -> None:
-        self.sync_scene()
+    def action_save_file(self) -> None:
+        self.save_editor_file()
 
     def action_load_sample(self) -> None:
+        self.scene_path = None
+        self.sub_title = self.SUB_TITLE
         self.editor.text = SCENE_SAMPLE
         self.sync_scene()
         self.status_bar.set_status("Sample scene loaded")
@@ -287,6 +362,24 @@ class CligebraApp(App[None]):
             self.exit()
             return
 
+        if value == "save":
+            self.command_palette.value = ""
+            self.save_editor_file()
+            return
+
+        if value.startswith("save "):
+            target = Path(value[5:].strip()).expanduser()
+            self.command_palette.value = ""
+            self.save_editor_file(target)
+            return
+
+        if value.startswith("open "):
+            target = Path(value[5:].strip()).expanduser()
+            self.command_palette.value = ""
+            self.load_editor_file(target)
+            self.sync_scene()
+            return
+
         if value in {"parse", "render"}:
             self.sync_scene()
             self.command_palette.value = ""
@@ -310,8 +403,8 @@ class CligebraApp(App[None]):
             self.renderer_bridge.close()
 
 
-def run() -> None:
-    CligebraApp().run()
+def run(scene_path: Path | None = None) -> None:
+    CligebraApp(scene_path=scene_path).run()
 
 
 if __name__ == "__main__":

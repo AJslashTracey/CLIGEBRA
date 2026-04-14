@@ -213,7 +213,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="cligebra", description="CLIGEBRA geometry workspace")
     subparsers = parser.add_subparsers(dest="command")
 
-    subparsers.add_parser("tui", help="open the interactive TUI")
+    tui = subparsers.add_parser("tui", help="open the interactive TUI")
+    tui.add_argument("file", nargs="?", type=Path, help="scene file to open in the built-in editor")
 
     watch = subparsers.add_parser("watch", help="watch a .clg scene file and update the renderer")
     watch.add_argument("file", type=Path, help="scene file to watch")
@@ -227,11 +228,18 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+
+    if argv and argv[0] not in {"tui", "watch", "check"} and not argv[0].startswith("-"):
+        run_tui(Path(argv[0]))
+        return 0
+
     parser = build_parser()
     args = parser.parse_args(argv)
 
     if args.command in {None, "tui"}:
-        run_tui()
+        path = getattr(args, "file", None)
+        run_tui(path)
         return 0
 
     if args.command == "watch":

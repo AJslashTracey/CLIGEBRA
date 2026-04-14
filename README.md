@@ -9,14 +9,14 @@ The current milestone focuses on the interface:
 - a live object list derived from the buffer
 - a separate PyVista scene window for 3D visualization
 
-The language reference lives in [LANGUAGE.md](/Users/aj/Desktop/GitHub/CLIGEBRA/LANGUAGE.md).
+The language reference lives in [LANGUAGE.md](https://github.com/AJslashTracey/CLIGEBRA/blob/main/LANGUAGE.md).
 
 ## Two Ways To Use It
 
 There are two normal ways to work with CLIGEBRA:
 
 1. Built-in editor  
-   Start `cligebra` or `cligebra tui` and edit the scene directly inside the app. The object list and renderer update from that editor.
+   Start `cligebra`, `cligebra tui`, or open a file directly with `cligebra <file.clg>`. The object list and renderer update from that editor.
 
 2. Neovim or another external editor  
    Edit a `.clg` file as a normal file and run `cligebra watch <file>` to update the renderer when the file is saved.
@@ -25,10 +25,16 @@ If you want everything in one place, use the built-in editor. If you want your u
 
 ## Run
 
-Fastest local run:
+Open the built-in editor:
 
 ```bash
-python3 main.py
+cligebra
+```
+
+Open a file directly in the built-in editor:
+
+```bash
+cligebra examples/basic.clg
 ```
 
 Watch a scene file and update the renderer when it is saved:
@@ -58,7 +64,14 @@ pip install -e .
 cligebra
 ```
 
-`cligebra` and `cligebra tui` start the TUI. `cligebra watch <file>` starts the PyVista renderer for a scene file.
+Without installing, you can also run:
+
+```bash
+python3 main.py
+python3 main.py examples/basic.clg
+```
+
+`cligebra`, `cligebra tui`, and `cligebra <file>` start the built-in editor. `cligebra watch <file>` starts the PyVista renderer for a scene file.
 
 ## Built-in Editor
 
@@ -74,7 +87,22 @@ or:
 cligebra tui
 ```
 
+or open a file directly:
+
+```bash
+cligebra examples/basic.clg
+```
+
 Edit the scene directly inside the app. The parsed object list updates in the sidebar and the renderer updates from the editor content.
+
+Inside the command palette you can use:
+
+- `save`
+- `save <file>`
+- `open <file>`
+- `sample`
+- `help`
+- `quit`
 
 ## Neovim
 
