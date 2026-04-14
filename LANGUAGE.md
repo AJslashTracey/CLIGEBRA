@@ -10,15 +10,27 @@ A `.clg` file is a list of object definitions, one per line:
 name = expression
 ```
 
+Naming is optional. You can also write just the expression:
+
+```text
+expression
+```
+
+This matters in the renderer:
+
+- named objects can show a label in the render
+- unnamed objects stay unlabeled, which helps avoid clutter
+- only named objects can be referenced later in the file
+
 Blank lines and lines starting with `#` are ignored.
 
 Example:
 
 ```text
-p1 = (0, 0, 0)
+(0, 0, 0)
 p2 = (4, 6, 0)
 v1 = vec[0, 0, 1]
-l1 = line(p1, p2)
+line((0, 0, 0), p2)
 E = plane(p1, v1)
 c1 = cyl(p1, p2, 1)
 s1 = sphere(p1, 2)
