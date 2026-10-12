@@ -118,12 +118,48 @@ nvim examples/cylinder.clg
 
 ### Renderer Shortcut
 
-The repository includes Neovim examples here:
+The repository includes completion and snippet examples here:
 
-- [editor/nvim/lua/config/autocmds.lua](/Users/aj/Desktop/GitHub/CLIGEBRA/editor/nvim/lua/config/autocmds.lua)
-- [editor/nvim/lua/plugins/cligebra.lua](/Users/aj/Desktop/GitHub/CLIGEBRA/editor/nvim/lua/plugins/cligebra.lua)
-- [editor/nvim/snippets/package.json](/Users/aj/Desktop/GitHub/CLIGEBRA/editor/nvim/snippets/package.json)
-- [editor/nvim/snippets/cligebra.json](/Users/aj/Desktop/GitHub/CLIGEBRA/editor/nvim/snippets/cligebra.json)
+- [editor/nvim/lua/plugins/cligebra.lua](editor/nvim/lua/plugins/cligebra.lua)
+- [editor/nvim/snippets/package.json](editor/nvim/snippets/package.json)
+- [editor/nvim/snippets/cligebra.json](editor/nvim/snippets/cligebra.json)
+
+For the renderer shortcut, add this to your Neovim configuration. In LazyVim,
+use `lua/config/autocmds.lua` inside your Neovim configuration directory:
+
+```lua
+vim.filetype.add({
+  extension = {
+    clg = "cligebra",
+    cligebra = "cligebra",
+  },
+})
+
+vim.api.nvim_create_autocmd("FileType", {
+  pattern = "cligebra",
+  callback = function(event)
+    vim.keymap.set("n", "<leader>cr", function()
+      local file = vim.api.nvim_buf_get_name(event.buf)
+
+      if file == "" then
+        vim.notify("Save this CLIGEBRA buffer before starting the renderer", vim.log.levels.WARN)
+        return
+      end
+
+      if vim.bo[event.buf].modified then
+        vim.cmd.write()
+      end
+
+      vim.fn.jobstart({ "cligebra", "watch", file }, {
+        detach = true,
+      })
+    end, { buffer = event.buf, desc = "Start CLIGEBRA renderer" })
+  end,
+})
+```
+
+Install CLIGEBRA first and start Neovim from a shell where `cligebra` is on your
+`PATH`, such as the shell with your virtual environment activated.
 
 With LazyVim's default leader key, `<leader>cr` means `Space c r`.
 
